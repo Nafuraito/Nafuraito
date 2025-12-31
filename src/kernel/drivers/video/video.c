@@ -100,6 +100,6 @@ void __attribute__((cdecl)) video_init(void) {
     video_init_called = 1;  // Set flag when function is called
     
     terminal_initialize();
-    terminal_writestring("Hello, kernel World!");
+    terminal_writestring("Welcome to Nafuraito");
     return;
 }

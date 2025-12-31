@@ -19,34 +19,9 @@ disk_image: bootloader kernel always
 	# Stage1 loads this to 0x7E00 in memory
 	dd if=build/stage2.bin of=build/disk.img bs=512 seek=1 conv=notrunc
 	
-	# Create partition table starting after stage2 (sector 2048 to be safe)
-	echo -e "o\nn\np\n1\n2048\n\nw" | fdisk build/disk.img
-	
-	# Set up loop device and create filesystem for kernel and other files
-	sudo losetup -D
-	LOOP_DEV=$$(sudo losetup --show -f build/disk.img); \
-	echo "Loop device: $$LOOP_DEV"; \
-	sudo partprobe $$LOOP_DEV; \
-	if [ -b $${LOOP_DEV}p1 ]; then \
-		sudo mkfs.ext4 $${LOOP_DEV}p1; \
-		mkdir -p /tmp/disk_mount; \
-		sudo mount $${LOOP_DEV}p1 /tmp/disk_mount; \
-		sudo cp build/kernel.bin /tmp/disk_mount/kernel.bin; \
-		sudo umount /tmp/disk_mount; \
-		rmdir /tmp/disk_mount; \
-		sudo losetup -d $$LOOP_DEV; \
-	else \
-		echo "Partition device not found, using offset mount"; \
-		mkdir -p /tmp/disk_mount; \
-		sudo losetup -d $$LOOP_DEV; \
-		PART_LOOP=$$(sudo losetup --show -f -o 1048576 build/disk.img); \
-		sudo mkfs.ext4 $$PART_LOOP; \
-		sudo mount $$PART_LOOP /tmp/disk_mount; \
-		sudo cp build/kernel.bin /tmp/disk_mount/kernel.bin; \
-		sudo umount /tmp/disk_mount; \
-		sudo losetup -d $$PART_LOOP; \
-		rmdir /tmp/disk_mount; \
-	fi
+	# Write kernel.bin at sector 64 (raw, no filesystem) for easy loading
+	# This allows bootloader to load kernel without ext4 driver
+	dd if=build/kernel.bin of=build/disk.img bs=512 seek=64 conv=notrunc
 
 bootloader:
 	$(MAKE) -C $(BOOTLOADER_DIR)

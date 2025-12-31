@@ -76,9 +76,16 @@ entry:
     mov dword [edi], 0x3003
     add edi, 0x1000
     
-    ; PDT entries (2MB pages)
-    mov dword [edi], 0x00000083
-    mov dword [edi + 8], 0x00200083
+    ; PDT entries (2MB pages) - map first 16MB (8 entries)
+    ; This covers: code at 0x7E00, kernel at 0x100000, stack at 0x900000
+    mov dword [edi],      0x00000083  ; 0MB - 2MB
+    mov dword [edi + 8],  0x00200083  ; 2MB - 4MB
+    mov dword [edi + 16], 0x00400083  ; 4MB - 6MB
+    mov dword [edi + 24], 0x00600083  ; 6MB - 8MB
+    mov dword [edi + 32], 0x00800083  ; 8MB - 10MB (covers stack at 0x900000)
+    mov dword [edi + 40], 0x00A00083  ; 10MB - 12MB
+    mov dword [edi + 48], 0x00C00083  ; 12MB - 14MB
+    mov dword [edi + 56], 0x00E00083  ; 14MB - 16MB
     
     ; Enable PAE
     mov eax, cr4
@@ -194,9 +201,8 @@ long_mode_start:
     mov byte [rdi+8], 'K'
     mov byte [rdi+9], 0x0F
     
-    ; Halt - we're in 64-bit mode, kernel_loader is 32-bit
-    cli
-    hlt
+    ; Jump to 64-bit Kernel loader
+    jmp load_kernel
 
 ; GDT must be in same section to be accessible in real mode
 align 8

@@ -1,7 +1,7 @@
-RUSTC=rustc --emit obj -C panic=abort --target i686-unknown-linux-gnu -C code-model=kernel -C relocation-model=static
+RUSTC=rustc --emit obj -C panic=abort --target x86_64-unknown-linux-gnu -C code-model=kernel -C relocation-model=static
 ASM=nasm
 LD=ld
-CC=gcc -m32 -nostdlib -I./ -c
+CC=gcc -m64 -nostdlib -I./ -c
 ASMFLAGS=-f obj
 
 BUILD_DIR=../../build
@@ -14,7 +14,7 @@ drivers:
 	$(CC) drivers/video/video.c -o $(BUILD_DIR)/kernel/driver_video.o
 
 entry: always
-	$(ASM) ./entry.asm -f elf32 -o $(BUILD_DIR)/kernel/entry.o
+	$(ASM) ./entry.asm -f elf64 -o $(BUILD_DIR)/kernel/entry.o
 
 kernel: always
 	$(RUSTC) entry.rs -o $(BUILD_DIR)/kernel/entry_rs.o
@@ -22,7 +22,7 @@ kernel: always
 KERNEL_OBJS=$(wildcard $(BUILD_DIR)/kernel/*.o)
 
 binary: always entry kernel drivers
-	$(LD) -m elf_i386 $(KERNEL_OBJS) -o $(BUILD_DIR)/kernel.bin
+	$(LD) -m elf_x86_64 -T linker.ld $(BUILD_DIR)/kernel/entry.o $(BUILD_DIR)/kernel/entry_rs.o $(BUILD_DIR)/kernel/driver_video.o -o $(BUILD_DIR)/kernel.bin
 
 always:
 	mkdir -p $(BUILD_DIR)/kernel
