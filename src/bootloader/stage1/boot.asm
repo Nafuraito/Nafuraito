@@ -9,11 +9,14 @@ bits 16
 %endmacro
 
 start:
+    ; Set up segments
+    cli
     xor ax, ax
     mov ds, ax
     mov es, ax
     mov ss, ax
     mov sp, 0x7C00          ; Set stack pointer below stage1
+    sti
 
     print_TTY 'M'
     print_TTY 'B'
@@ -22,38 +25,58 @@ start:
 
     mov [drive_number], dl
     
+    ; Reset disk system first
+    xor ax, ax
+    mov dl, [drive_number]
+    int 0x13
+    
     ; Read stage2 using CHS (legacy BIOS)
-    ; LBA 1 = CHS (0, 0, 2) - sector numbering starts at 1
-    ; Read sectors to load up to 0x93A0
-    mov ax, 0x7E0
+    ; CHS sector 2 = LBA sector 1 (immediately after MBR)
+    ; Load stage2 at 0x7E00
+    mov ax, 0x07E0          ; Segment 0x07E0
     mov es, ax
-    xor bx, bx              ; ES:BX = 0x7E0:0x0000 = 0x7E00
+    xor bx, bx              ; ES:BX = 0x07E0:0x0000 = 0x7E00
 
     print_TTY 'R'
     print_TTY 'D'
     print_TTY ' '
     
-    mov ah, 0x02            ; Read sectors
-    mov al, 30              ; Number of sectors (0x93A0-0x7E00)/0x200 = ~30 sectors
+    mov si, 3               ; Retry counter
+.retry:
+    mov ah, 0x02            ; Read sectors function
+    mov al, 20              ; Number of sectors to read (10KB)
     mov ch, 0               ; Cylinder 0
-    mov cl, 2               ; Sector 2 (sector 1 is MBR)
+    mov cl, 2               ; Start at sector 2 (CHS sectors are 1-based)
     mov dh, 0               ; Head 0
     mov dl, [drive_number]
     int 0x13
-    jc disk_error
+    jnc .read_ok            ; Jump if no error (CF=0)
+    
+    ; Reset disk and retry
+    xor ax, ax
+    mov dl, [drive_number]
+    int 0x13
+    
+    dec si
+    jnz .retry
+    jmp disk_error          ; All retries failed
+
+.read_ok:
+    print_TTY 'O'
+    print_TTY 'K'
+    print_TTY ' '
+    
+    ; Reset segments before jump
+    xor ax, ax
+    mov es, ax
+    mov ds, ax
     
     print_TTY 'J'
     print_TTY 'M'
     print_TTY 'P'
     print_TTY ' '
 
-    jmp 0x7E00:0x0000
-
-    print_TTY 'J'
-    print_TTY 'E'
-    print_TTY 'R'
-    print_TTY 'R'
-    print_TTY ' '
+    jmp 0x0000:0x7E00
 
 disk_error:
     print_TTY 'D'
@@ -68,5 +91,3 @@ drive_number: db 0
 
 times 510-($-$$) db 0
 dw 0xAA55
-
-buffer:

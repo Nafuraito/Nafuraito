@@ -15,9 +15,9 @@ disk_image: bootloader kernel always
 	# Write stage1 bootloader to MBR (sector 0)
 	dd if=build/stage1.bin of=build/disk.img bs=512 seek=0 conv=notrunc
 	
-	# Write stage2 bootloader at fixed location 0x7E00 (sector 31.75, so we use sector 32)
-	# 0x7E00 = 32256 bytes = sector 63 (512 byte sectors)
-	dd if=build/stage2.bin of=build/disk.img bs=512 seek=63 conv=notrunc
+	# Write stage2 bootloader immediately after MBR (sector 1)
+	# Stage1 loads this to 0x7E00 in memory
+	dd if=build/stage2.bin of=build/disk.img bs=512 seek=1 conv=notrunc
 	
 	# Create partition table starting after stage2 (sector 2048 to be safe)
 	echo -e "o\nn\np\n1\n2048\n\nw" | fdisk build/disk.img

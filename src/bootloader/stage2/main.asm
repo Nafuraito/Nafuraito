@@ -1,6 +1,7 @@
 bits 16
 
-section .text
+; Entry section - must be first in binary
+section .text.entry
 
 global entry
 extern load_kernel
@@ -13,9 +14,32 @@ extern load_kernel
 %endmacro
 
 entry:
+    ; Ensure segments are set correctly
+    cli
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+    mov ss, ax
+    mov sp, 0x7C00
+    sti
+    
     print_TTY 'S'
     print_TTY '2'
     print_TTY ' '
+
+    ; Set video mode 3 (80x25 text mode, 16 colors) - this clears the screen
+    ; and resets video hardware to a known state
+    mov ax, 0x0003
+    int 0x10
+    
+    ; Set display page to 0
+    mov ax, 0x0500
+    int 0x10
+    
+    ; Disable text cursor (hide it)
+    mov ah, 0x01
+    mov cx, 0x2607      ; Set cursor shape to invisible
+    int 0x10
 
     ; Check if long mode is supported
     mov eax, 0x80000000
@@ -67,10 +91,10 @@ entry:
     or eax, (1 << 8)
     wrmsr
     
-    ; Load GDT and enable paging
+    ; Load GDT and enable paging + protected mode
     lgdt [gdt_descriptor]
     mov eax, cr0
-    or eax, (1 << 31)
+    or eax, (1 << 31) | 1   ; Enable paging AND protected mode
     mov cr0, eax
     
     ; Jump to 64-bit code
@@ -91,6 +115,9 @@ entry:
     mov cr0, eax
     
     jmp 0x08:protected_mode_start
+
+; Regular text section for the rest
+section .text
 
 bits 32
 protected_mode_start:
@@ -121,9 +148,58 @@ long_mode_start:
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    ; Jump to kernel loader in 64-bit mode
-    jmp load_kernel
+    
+    ;=========================================================================
+    ; VGA REGISTER INITIALIZATION FOR 64-BIT MODE
+    ;=========================================================================
+    
+    ; Set CRTC Start Address to 0 (critical for fixing flickering)
+    mov dx, 0x3D4
+    mov al, 0x0C            ; Start Address High
+    out dx, al
+    inc dx
+    xor al, al
+    out dx, al
+    
+    dec dx
+    mov al, 0x0D            ; Start Address Low  
+    out dx, al
+    inc dx
+    xor al, al
+    out dx, al
+    
+    ; Disable cursor
+    dec dx
+    mov al, 0x0A
+    out dx, al
+    inc dx
+    mov al, 0x20
+    out dx, al
+    
+    ; Clear VGA buffer and print "64" to indicate 64-bit mode
+    mov rdi, 0xB8000
+    mov rcx, 2000
+    mov rax, 0x0F200F200F200F20
+    rep stosq
+    
+    mov rdi, 0xB8000
+    mov byte [rdi], '6'
+    mov byte [rdi+1], 0x0F
+    mov byte [rdi+2], '4'
+    mov byte [rdi+3], 0x0F
+    mov byte [rdi+4], ' '
+    mov byte [rdi+5], 0x0F
+    mov byte [rdi+6], 'O'
+    mov byte [rdi+7], 0x0F
+    mov byte [rdi+8], 'K'
+    mov byte [rdi+9], 0x0F
+    
+    ; Halt - we're in 64-bit mode, kernel_loader is 32-bit
+    cli
+    hlt
 
+; GDT must be in same section to be accessible in real mode
+align 8
 gdt:
     dq 0x0000000000000000  ; Null descriptor
     dq 0x00AF9A000000FFFF  ; 64-bit code segment
