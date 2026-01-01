@@ -29,26 +29,6 @@ load_kernel:
     mov rax, 0x0F200F200F200F20
     rep stosq
 
-    ; Print "Loading kernel..." on line 1
-    mov rdi, 0xB8000
-    mov word [rdi],    0x0F4C  ; 'L'
-    mov word [rdi+2],  0x0F6F  ; 'o'
-    mov word [rdi+4],  0x0F61  ; 'a'
-    mov word [rdi+6],  0x0F64  ; 'd'
-    mov word [rdi+8],  0x0F69  ; 'i'
-    mov word [rdi+10], 0x0F6E  ; 'n'
-    mov word [rdi+12], 0x0F67  ; 'g'
-    mov word [rdi+14], 0x0F20  ; ' '
-    mov word [rdi+16], 0x0F6B  ; 'k'
-    mov word [rdi+18], 0x0F65  ; 'e'
-    mov word [rdi+20], 0x0F72  ; 'r'
-    mov word [rdi+22], 0x0F6E  ; 'n'
-    mov word [rdi+24], 0x0F65  ; 'e'
-    mov word [rdi+26], 0x0F6C  ; 'l'
-    mov word [rdi+28], 0x0F2E  ; '.'
-    mov word [rdi+30], 0x0F2E  ; '.'
-    mov word [rdi+32], 0x0F2E  ; '.'
-
     ;=========================================================================
     ; LOAD KERNEL VIA ATA PIO
     ;=========================================================================
@@ -57,12 +37,6 @@ load_kernel:
     call ata_wait_ready
     test rax, rax
     jz .ata_error
-    
-    ; Print "ATA" to show ATA is ready
-    mov rdi, 0xB8000 + 40
-    mov word [rdi],   0x0A41  ; 'A' green
-    mov word [rdi+2], 0x0A54  ; 'T' green
-    mov word [rdi+4], 0x0A41  ; 'A' green
 
     ; Read kernel sectors
     mov rdi, KERNEL_LOAD_ADDR   ; Destination address
@@ -71,44 +45,11 @@ load_kernel:
     call ata_read_sectors
     test rax, rax
     jz .read_error
-    
-    ; Print "RD" to show read complete
-    mov rdi, 0xB8000 + 48
-    mov word [rdi],   0x0A52  ; 'R' green
-    mov word [rdi+2], 0x0A44  ; 'D' green
 
     ; Verify we read something (check first bytes aren't all zero)
     mov rax, [KERNEL_LOAD_ADDR]
     test rax, rax
     jz .empty_kernel
-
-    ; Print "OK" to show kernel loaded
-    mov rdi, 0xB8000 + 54
-    mov word [rdi],   0x0A4F  ; 'O' green
-    mov word [rdi+2], 0x0A4B  ; 'K' green
-
-    ; Print "Jumping to kernel..." on line 2
-    mov rdi, 0xB8000 + 160
-    mov word [rdi],    0x0E4A  ; 'J' yellow
-    mov word [rdi+2],  0x0E75  ; 'u' yellow
-    mov word [rdi+4],  0x0E6D  ; 'm' yellow
-    mov word [rdi+6],  0x0E70  ; 'p' yellow
-    mov word [rdi+8],  0x0E69  ; 'i' yellow
-    mov word [rdi+10], 0x0E6E  ; 'n' yellow
-    mov word [rdi+12], 0x0E67  ; 'g' yellow
-    mov word [rdi+14], 0x0E20  ; ' '
-    mov word [rdi+16], 0x0E74  ; 't'
-    mov word [rdi+18], 0x0E6F  ; 'o'
-    mov word [rdi+20], 0x0E20  ; ' '
-    mov word [rdi+22], 0x0E6B  ; 'k'
-    mov word [rdi+24], 0x0E65  ; 'e'
-    mov word [rdi+26], 0x0E72  ; 'r'
-    mov word [rdi+28], 0x0E6E  ; 'n'
-    mov word [rdi+30], 0x0E65  ; 'e'
-    mov word [rdi+32], 0x0E6C  ; 'l'
-    mov word [rdi+34], 0x0E2E  ; '.'
-    mov word [rdi+36], 0x0E2E  ; '.'
-    mov word [rdi+38], 0x0E2E  ; '.'
     
     ; Set up stack for kernel
     mov rsp, 0x900000
@@ -118,35 +59,12 @@ load_kernel:
     jmp rax
 
 .ata_error:
-    mov rdi, 0xB8000 + 160
-    mov word [rdi],   0x0C41  ; 'A' red
-    mov word [rdi+2], 0x0C54  ; 'T' red
-    mov word [rdi+4], 0x0C41  ; 'A' red
-    mov word [rdi+6], 0x0C20  ; ' '
-    mov word [rdi+8], 0x0C45  ; 'E' red
-    mov word [rdi+10], 0x0C52 ; 'R' red
-    mov word [rdi+12], 0x0C52 ; 'R' red
     jmp .halt
 
 .read_error:
-    mov rdi, 0xB8000 + 160
-    mov word [rdi],   0x0C52  ; 'R' red
-    mov word [rdi+2], 0x0C45  ; 'E' red
-    mov word [rdi+4], 0x0C41  ; 'A' red
-    mov word [rdi+6], 0x0C44  ; 'D' red
-    mov word [rdi+8], 0x0C20  ; ' '
-    mov word [rdi+10], 0x0C45 ; 'E' red
-    mov word [rdi+12], 0x0C52 ; 'R' red
-    mov word [rdi+14], 0x0C52 ; 'R' red
     jmp .halt
 
 .empty_kernel:
-    mov rdi, 0xB8000 + 160
-    mov word [rdi],   0x0C45  ; 'E' red
-    mov word [rdi+2], 0x0C4D  ; 'M' red
-    mov word [rdi+4], 0x0C50  ; 'P' red
-    mov word [rdi+6], 0x0C54  ; 'T' red
-    mov word [rdi+8], 0x0C59  ; 'Y' red
     jmp .halt
 
 .halt:

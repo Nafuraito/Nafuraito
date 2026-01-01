@@ -35,7 +35,7 @@ always:
 
 run: all
 # run with 4 gigs of RAM  
-	qemu-system-x86_64 -m 2048 -drive file=build/disk.img,format=raw -boot c -enable-kvm -smp 1 -net nic -net user
+	qemu-system-x86_64 -m 1024 -drive file=build/disk.img,format=raw -boot c -enable-kvm -smp 1 -net nic -net user
 
 run-debug: all
 # Debug mode with serial output and CPU trace

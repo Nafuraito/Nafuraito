@@ -1,13 +1,6 @@
 org 0x7C00
 bits 16
 
-%macro print_TTY 1
-    mov al, %1
-    mov bh, 0
-    mov ah, 0Eh
-    int 10h
-%endmacro
-
 start:
     ; Set up segments
     cli
@@ -17,11 +10,6 @@ start:
     mov ss, ax
     mov sp, 0x7C00          ; Set stack pointer below stage1
     sti
-
-    print_TTY 'M'
-    print_TTY 'B'
-    print_TTY 'R'
-    print_TTY ' '
 
     mov [drive_number], dl
     
@@ -36,10 +24,6 @@ start:
     mov ax, 0x07E0          ; Segment 0x07E0
     mov es, ax
     xor bx, bx              ; ES:BX = 0x07E0:0x0000 = 0x7E00
-
-    print_TTY 'R'
-    print_TTY 'D'
-    print_TTY ' '
     
     mov si, 3               ; Retry counter
 .retry:
@@ -62,28 +46,15 @@ start:
     jmp disk_error          ; All retries failed
 
 .read_ok:
-    print_TTY 'O'
-    print_TTY 'K'
-    print_TTY ' '
     
     ; Reset segments before jump
     xor ax, ax
     mov es, ax
     mov ds, ax
-    
-    print_TTY 'J'
-    print_TTY 'M'
-    print_TTY 'P'
-    print_TTY ' '
 
     jmp 0x0000:0x7E00
 
 disk_error:
-    print_TTY 'D'
-    print_TTY 'E'
-    print_TTY 'R'
-    print_TTY 'R'
-    print_TTY ' '
     cli
     hlt
 

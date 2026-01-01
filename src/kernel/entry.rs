@@ -23,7 +23,8 @@ pub extern "C" fn enter() -> ! {
         video::init_vga();
         
         // Write welcome message (use \0 for null termination)
-        video::write_string("Welcome to Nafuraito!\0");
+        video::write_string("Welcome to Nafuraito! \0");
+        video::write_string("This is a fully self and from scratch developed OS.\0");
     }
     
     // Halt the CPU - disable interrupts and halt in a loop

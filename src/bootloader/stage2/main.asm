@@ -6,13 +6,6 @@ section .text.entry
 global entry
 extern load_kernel
 
-%macro print_TTY 1
-    mov al, %1
-    mov bh, 0
-    mov ah, 0Eh
-    int 10h
-%endmacro
-
 entry:
     ; Ensure segments are set correctly
     cli
@@ -22,10 +15,6 @@ entry:
     mov ss, ax
     mov sp, 0x7C00
     sti
-    
-    print_TTY 'S'
-    print_TTY '2'
-    print_TTY ' '
 
     ; Set video mode 3 (80x25 text mode, 16 colors) - this clears the screen
     ; and resets video hardware to a known state
@@ -135,15 +124,6 @@ protected_mode_start:
     mov gs, ax
     mov ss, ax
     
-    ; Debug: 32-bit mode
-    mov al, 'P'
-    mov dx, 0x3F8
-    out dx, al
-    mov al, 'M'
-    out dx, al
-    mov al, 10
-    out dx, al
-    
     ; Jump to kernel loader in 32-bit mode
     jmp load_kernel
 
@@ -183,23 +163,11 @@ long_mode_start:
     mov al, 0x20
     out dx, al
     
-    ; Clear VGA buffer and print "64" to indicate 64-bit mode
+    ; Clear VGA buffer
     mov rdi, 0xB8000
     mov rcx, 2000
     mov rax, 0x0F200F200F200F20
     rep stosq
-    
-    mov rdi, 0xB8000
-    mov byte [rdi], '6'
-    mov byte [rdi+1], 0x0F
-    mov byte [rdi+2], '4'
-    mov byte [rdi+3], 0x0F
-    mov byte [rdi+4], ' '
-    mov byte [rdi+5], 0x0F
-    mov byte [rdi+6], 'O'
-    mov byte [rdi+7], 0x0F
-    mov byte [rdi+8], 'K'
-    mov byte [rdi+9], 0x0F
     
     ; Jump to 64-bit Kernel loader
     jmp load_kernel
