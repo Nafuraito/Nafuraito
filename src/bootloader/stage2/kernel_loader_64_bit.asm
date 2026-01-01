@@ -5,6 +5,12 @@
 
 global load_kernel
 
+extern vbe_framebuffer_addr
+extern vbe_pitch
+extern vbe_width
+extern vbe_height
+extern vbe_bpp
+
 bits 64
 
 ;=============================================================================
@@ -34,14 +40,8 @@ section .text
 
 load_kernel:
     ;=========================================================================
-    ; VGA INITIALIZATION - Clear screen
+    ; Graphics mode is already set by VESA - no VGA text clearing needed
     ;=========================================================================
-    
-    ; Clear the entire VGA text buffer
-    mov rdi, 0xB8000
-    mov rcx, 2000
-    mov rax, 0x0F200F200F200F20
-    rep stosq
 
     ;=========================================================================
     ; LOAD KERNEL VIA ATA PIO
@@ -65,8 +65,22 @@ load_kernel:
     test rax, rax
     jz .halt
     
-    ; Set up stack and jump to kernel
+    ; Set up stack
     mov rsp, 0x900000
+    
+    ; Pass VBE info to kernel via registers (System V AMD64 calling convention)
+    ; rdi = framebuffer address
+    ; rsi = pitch
+    ; rdx = width
+    ; rcx = height
+    ; r8  = bpp
+    mov edi, [vbe_framebuffer_addr]
+    movzx rsi, word [vbe_pitch]
+    movzx rdx, word [vbe_width]
+    movzx rcx, word [vbe_height]
+    movzx r8, byte [vbe_bpp]
+    
+    ; Jump to kernel
     mov rax, KERNEL_LOAD_ADDR
     jmp rax
 

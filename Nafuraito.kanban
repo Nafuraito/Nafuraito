@@ -108,17 +108,7 @@
     {
       "id": "5892d37a-6046-4552-a892-4ae6c84a831e",
       "title": "Work in Progress",
-      "cards": [
-        {
-          "id": "2fc33924-b6e6-44ce-b163-74f492c9c474",
-          "listId": "5892d37a-6046-4552-a892-4ae6c84a831e",
-          "title": "Simple text video driver mainly built for debugging",
-          "description": "",
-          "labels": [],
-          "checkboxes": [],
-          "comments": []
-        }
-      ]
+      "cards": []
     },
     {
       "id": "f46a9864-5dbd-4798-aba4-ef71b837f860",
@@ -128,7 +118,17 @@
     {
       "id": "c50f57ce-ab45-4fb6-8621-d17d59be8c50",
       "title": "Done/Implemented (and maybe tested)",
-      "cards": []
+      "cards": [
+        {
+          "id": "2fc33924-b6e6-44ce-b163-74f492c9c474",
+          "listId": "c50f57ce-ab45-4fb6-8621-d17d59be8c50",
+          "title": "Simple text video driver mainly built for debugging",
+          "description": "",
+          "labels": [],
+          "checkboxes": [],
+          "comments": []
+        }
+      ]
     }
   ],
   "archive": {
