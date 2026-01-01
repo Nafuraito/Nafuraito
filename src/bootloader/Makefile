@@ -10,8 +10,8 @@ stage1: always
 
 stage2_64: always
 	$(ASM) -f elf64 stage2/main.asm -o $(BUILD_DIR)/stage2/main.o
-	$(ASM) -f elf64 stage2/kernel_loader_64_bit.asm -o $(BUILD_DIR)/stage2/kernel_loader_64_bit.o
-	$(LD) -m elf_x86_64 -T linker.ld --oformat binary $(BUILD_DIR)/stage2/main.o $(BUILD_DIR)/stage2/kernel_loader_64_bit.o -o $(BUILD_DIR)/stage2.bin
+	$(ASM) -f elf64 stage2/kernel_loader_64_bit.asm -o $(BUILD_DIR)/stage2/kernel_loader.o
+	$(LD) -m elf_x86_64 -T linker.ld --oformat binary $(BUILD_DIR)/stage2/main.o $(BUILD_DIR)/stage2/kernel_loader.o -o $(BUILD_DIR)/stage2.bin
 
 always:
 	mkdir -p $(BUILD_DIR)

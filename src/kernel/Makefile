@@ -11,7 +11,7 @@ BUILD_DIR=../../build
 all: binary
 
 drivers:
-	$(CC) drivers/video/video.c -o $(BUILD_DIR)/kernel/driver_video.o
+	$(CC) drivers/video/vga.c -o $(BUILD_DIR)/kernel/driver_video_vga.o
 
 entry: always
 	$(ASM) ./entry.asm -f elf64 -o $(BUILD_DIR)/kernel/entry.o
@@ -22,7 +22,7 @@ kernel: always
 KERNEL_OBJS=$(wildcard $(BUILD_DIR)/kernel/*.o)
 
 binary: always entry kernel drivers
-	$(LD) -m elf_x86_64 -T linker.ld $(BUILD_DIR)/kernel/entry.o $(BUILD_DIR)/kernel/entry_rs.o $(BUILD_DIR)/kernel/driver_video.o -o $(BUILD_DIR)/kernel.bin
+	$(LD) -m elf_x86_64 -T linker.ld $(BUILD_DIR)/kernel/entry.o $(BUILD_DIR)/kernel/entry_rs.o $(BUILD_DIR)/kernel/driver_video_vga.o -o $(BUILD_DIR)/kernel.bin
 
 always:
 	mkdir -p $(BUILD_DIR)/kernel

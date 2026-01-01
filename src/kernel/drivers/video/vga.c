@@ -1,4 +1,4 @@
-#include <stdint.h>
+#include "../stdint.h"
 
 /* Hardware text mode color constants. */
 enum vga_color {
@@ -96,10 +96,14 @@ void terminal_writestring(const char* data)
 // Add a global variable to track if function was called
 volatile int video_init_called = 0;
 
-void __attribute__((cdecl)) video_init(void) {
+void __attribute__((cdecl)) initialize_vga_video(void) {
     video_init_called = 1;  // Set flag when function is called
     
     terminal_initialize();
-    terminal_writestring("Welcome to Nafuraito");
     return;
+}
+
+void __attribute__((cdecl)) writestring_vga(const char* data) {
+	terminal_writestring(data);
+	return;
 }

@@ -2,27 +2,36 @@
 #![no_std]
 #![no_main]
 
-extern "C" { fn video_init(); }
-
 use core::panic::PanicInfo;
+
+#[path = "drivers/drivers.rs"]
+mod drivers;
+use drivers::drivers::video;
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    loop { unsafe { core::arch::asm!("hlt"); } }
+    loop { 
+        unsafe { core::arch::asm!("cli"); }
+        unsafe { core::arch::asm!("hlt"); } 
+    }
 }
 
 #[no_mangle]
 pub extern "C" fn enter() -> ! {
-    // Add some indication before calling video_init
     unsafe { 
-        video_init();
+        // Initialize VGA terminal
+        video::init_vga();
+        
+        // Write welcome message (use \0 for null termination)
+        video::write_string("Welcome to Nafuraito!\0");
     }
     
-    // Add a different halt pattern to distinguish success
+    // Halt the CPU - disable interrupts and halt in a loop
+    // This prevents any further execution and stops flickering
     loop { 
         unsafe { 
-            core::arch::asm!("nop"); // Different instruction pattern
-            core::arch::asm!("hlt"); 
+            core::arch::asm!("cli");  // Disable interrupts
+            core::arch::asm!("hlt");  // Halt until next interrupt (none will come)
         } 
     }
 }
