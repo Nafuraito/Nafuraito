@@ -1,13 +1,21 @@
+; Nafuraito Stage 2 Bootloader
+;
+; Handles CPU mode transitions (Real -> Protected -> Long Mode)
+; Sets up paging, GDT, and transfers control to the kernel loader.
+
 bits 16
 
-; Entry section - must be first in binary
 section .text.entry
 
 global entry
 extern load_kernel
 
+;=============================================================================
+; Entry Point (16-bit Real Mode)
+;=============================================================================
+
 entry:
-    ; Ensure segments are set correctly
+    ; Set up segments
     cli
     xor ax, ax
     mov ds, ax
@@ -30,7 +38,7 @@ entry:
     mov cx, 0x2607      ; Set cursor shape to invisible
     int 0x10
 
-    ; Check if long mode is supported
+    ; Check for long mode support
     mov eax, 0x80000000
     cpuid
     cmp eax, 0x80000001
@@ -41,7 +49,7 @@ entry:
     test edx, (1 << 29)
     jz .no_long_mode
     
-    ; Set up for long mode
+    ; Prepare for long mode
     cli
     
     ; Enable A20 line
@@ -81,7 +89,7 @@ entry:
     or eax, (1 << 5)
     mov cr4, eax
     
-    ; Set LME bit
+    ; Enable long mode (LME)
     mov ecx, 0xC0000080
     rdmsr
     or eax, (1 << 8)
@@ -97,7 +105,7 @@ entry:
     jmp 0x08:long_mode_start
 
 .no_long_mode:
-    ; Enter 32-bit protected mode
+    ; Fallback to 32-bit protected mode
     cli
     
     ; Enable A20 line
@@ -112,7 +120,10 @@ entry:
     
     jmp 0x08:protected_mode_start
 
-; Regular text section for the rest
+;=============================================================================
+; 32-bit Protected Mode
+;=============================================================================
+
 section .text
 
 bits 32
@@ -126,6 +137,10 @@ protected_mode_start:
     
     ; Jump to kernel loader in 32-bit mode
     jmp load_kernel
+
+;=============================================================================
+; 64-bit Long Mode
+;=============================================================================
 
 bits 64
 long_mode_start:
@@ -149,7 +164,7 @@ long_mode_start:
     out dx, al
     
     dec dx
-    mov al, 0x0D            ; Start Address Low  
+    mov al, 0x0D            ; Start Address Low
     out dx, al
     inc dx
     xor al, al
@@ -172,12 +187,15 @@ long_mode_start:
     ; Jump to 64-bit Kernel loader
     jmp load_kernel
 
-; GDT must be in same section to be accessible in real mode
+;=============================================================================
+; Global Descriptor Table
+;=============================================================================
+; GDT must be in the same section to be accessible in real mode
 align 8
 gdt:
-    dq 0x0000000000000000  ; Null descriptor
-    dq 0x00AF9A000000FFFF  ; 64-bit code segment
-    dq 0x00CF92000000FFFF  ; Data segment
+    dq 0x0000000000000000   ; Null descriptor
+    dq 0x00AF9A000000FFFF   ; 64-bit code segment
+    dq 0x00CF92000000FFFF   ; Data segment
 
 gdt_descriptor:
     dw gdt_descriptor - gdt - 1

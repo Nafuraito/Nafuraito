@@ -1,6 +1,16 @@
+/**
+ * VGA Text Mode Driver
+ * 
+ * Provides basic text output capabilities for the Nafuraito kernel.
+ * Supports 80x25 text mode with 16 colors.
+ */
+
 #include "../stdint.h"
 
-/* Hardware text mode color constants. */
+/*=============================================================================
+ * VGA Color Definitions
+ *===========================================================================*/
+
 enum vga_color {
 	VGA_COLOR_BLACK = 0,
 	VGA_COLOR_BLUE = 1,
@@ -93,17 +103,16 @@ void terminal_writestring(const char* data)
 	terminal_write(data, strlen(data));
 }
 
-// Add a global variable to track if function was called
-volatile int video_init_called = 0;
+/*=============================================================================
+ * Public API - Called from Rust kernel
+ *===========================================================================*/
 
-void __attribute__((cdecl)) initialize_vga_video(void) {
-    video_init_called = 1;  // Set flag when function is called
-    
-    terminal_initialize();
-    return;
+void initialize_vga_video(void) 
+{
+	terminal_initialize();
 }
 
-void __attribute__((cdecl)) writestring_vga(const char* data) {
+void writestring_vga(const char* data) 
+{
 	terminal_writestring(data);
-	return;
 }

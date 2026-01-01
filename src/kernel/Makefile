@@ -1,28 +1,35 @@
-RUSTC=rustc --emit obj -C panic=abort --target x86_64-unknown-linux-gnu -C code-model=kernel -C relocation-model=static
-ASM=nasm
-LD=ld
-CC=gcc -m64 -nostdlib -I./ -c
-ASMFLAGS=-f obj
+# Nafuraito Kernel Build Configuration
 
-BUILD_DIR=../../build
+RUSTC = rustc --emit obj -C panic=abort --target x86_64-unknown-linux-gnu \
+        -C code-model=kernel -C relocation-model=static
+ASM = nasm
+LD = ld
+CC = gcc -m64 -nostdlib -fno-stack-protector -ffreestanding -c
 
-.PHONY: all always entry drivers kernel binary
+BUILD_DIR = ../../build/kernel
 
-all: binary
+.PHONY: all clean
 
-drivers:
-	$(CC) drivers/video/vga.c -o $(BUILD_DIR)/kernel/driver_video_vga.o
+all: $(BUILD_DIR) kernel.bin
 
-entry: always
-	$(ASM) ./entry.asm -f elf64 -o $(BUILD_DIR)/kernel/entry.o
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
 
-kernel: always
-	$(RUSTC) entry.rs -o $(BUILD_DIR)/kernel/entry_rs.o
+kernel.bin: entry.o entry_rs.o vga.o
+	$(LD) -m elf_x86_64 -T linker.ld \
+		$(BUILD_DIR)/entry.o \
+		$(BUILD_DIR)/entry_rs.o \
+		$(BUILD_DIR)/vga.o \
+		-o ../../build/kernel.bin
 
-KERNEL_OBJS=$(wildcard $(BUILD_DIR)/kernel/*.o)
+entry.o: $(BUILD_DIR)
+	$(ASM) entry.asm -f elf64 -o $(BUILD_DIR)/entry.o
 
-binary: always entry kernel drivers
-	$(LD) -m elf_x86_64 -T linker.ld $(BUILD_DIR)/kernel/entry.o $(BUILD_DIR)/kernel/entry_rs.o $(BUILD_DIR)/kernel/driver_video_vga.o -o $(BUILD_DIR)/kernel.bin
+entry_rs.o: $(BUILD_DIR)
+	$(RUSTC) entry.rs -o $(BUILD_DIR)/entry_rs.o
 
-always:
-	mkdir -p $(BUILD_DIR)/kernel
+vga.o: $(BUILD_DIR)
+	$(CC) drivers/video/vga.c -o $(BUILD_DIR)/vga.o
+
+clean:
+	rm -rf $(BUILD_DIR)
