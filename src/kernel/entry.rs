@@ -9,9 +9,8 @@
 
 use core::panic::PanicInfo;
 
-#[path = "drivers/drivers.rs"]
-mod drivers;
-use drivers::video;
+#[path = "drivers/video/video.rs"]
+mod video;
 use video::{COLOR_PURPLE};
 
 // / Panic handler - halts the CPU on panic
@@ -54,11 +53,6 @@ pub extern "C" fn enter(
         video::print("Welcome to Nafuraito! \0");
         video::print("A fully self-developed operating system from scratch. \0");
         video::print("!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ \0");
-
-        video::write_pixels_from_arrays(&[300,301,302,303,304,305,300,301,302,303,304,305],
-            &[300,300,300,300,300,300,301,301,301,301,301,301],
-            &[COLOR_PURPLE,COLOR_PURPLE,COLOR_PURPLE,COLOR_PURPLE,COLOR_PURPLE,COLOR_PURPLE,
-            COLOR_PURPLE,COLOR_PURPLE,COLOR_PURPLE,COLOR_PURPLE,COLOR_PURPLE,COLOR_PURPLE]);
     }
 
     // Halt the CPU permanently

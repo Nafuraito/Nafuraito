@@ -50,15 +50,6 @@
           "comments": []
         },
         {
-          "id": "40679419-0d1d-48e0-92c6-3f7798a5845f",
-          "listId": "0cabc892-36e5-4b18-b009-35d0869beb25",
-          "title": "Implement a real 24-bit-color video driver with resolution 1920x1080px and two layers (front- and backlayer)",
-          "description": "",
-          "labels": [],
-          "checkboxes": [],
-          "comments": []
-        },
-        {
           "id": "b0b44de4-b9ec-4bdb-a834-482ea4d232cf",
           "listId": "0cabc892-36e5-4b18-b009-35d0869beb25",
           "title": "Create a GUI Framework",
@@ -108,7 +99,17 @@
     {
       "id": "5892d37a-6046-4552-a892-4ae6c84a831e",
       "title": "Work in Progress",
-      "cards": []
+      "cards": [
+        {
+          "id": "40679419-0d1d-48e0-92c6-3f7798a5845f",
+          "listId": "5892d37a-6046-4552-a892-4ae6c84a831e",
+          "title": "Implement a real 24-bit-color video driver with resolution 1920x1080px and two layers (front- and backlayer)",
+          "description": "",
+          "labels": [],
+          "checkboxes": [],
+          "comments": []
+        }
+      ]
     },
     {
       "id": "f46a9864-5dbd-4798-aba4-ef71b837f860",
