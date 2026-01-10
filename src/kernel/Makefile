@@ -1,7 +1,8 @@
 # Nafuraito Kernel Build Configuration
 
 RUSTC = rustc --emit obj -C panic=abort --target x86_64-unknown-linux-gnu \
-        -C code-model=kernel -C relocation-model=static
+        -C code-model=kernel -C relocation-model=static \
+        -C opt-level=2 -C overflow-checks=no -C debug-assertions=no
 ASM = nasm
 LD = ld
 CC = gcc -m64 -nostdlib -fno-stack-protector -ffreestanding -c

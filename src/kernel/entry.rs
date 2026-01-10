@@ -1,17 +1,22 @@
 //! Nafuraito Kernel Entry Point
 //! 
 //! This is the main entry point for the Nafuraito operating system kernel.
-//! It initializes the VGA display and halts the CPU.
+//! It initializes the VGA display, memory management, and halts the CPU.
 
 #![crate_type = "staticlib"]
 #![no_std]
 #![no_main]
+#![allow(unused)]
 
 use core::panic::PanicInfo;
 
 #[path = "drivers/video/video.rs"]
 mod video;
-use video::{COLOR_PURPLE};
+use video::COLOR_PURPLE;
+use core::fmt::Write;
+
+#[path = "memory/mod.rs"]
+mod memory;
 
 // / Panic handler - halts the CPU on panic
 #[panic_handler]
@@ -26,14 +31,15 @@ fn panic(_info: &PanicInfo) -> ! {
 
 /// Kernel entry point called from assembly/bootloader
 /// 
-/// Receives framebuffer info from bootloader via System V AMD64 ABI:
+/// Receives framebuffer info and memory map from bootloader via System V AMD64 ABI:
 /// - rdi (fb_addr): Framebuffer physical address
 /// - rsi (pitch): Bytes per scanline
 /// - rdx (width): Screen width in pixels
 /// - rcx (height): Screen height in pixels
 /// - r8 (bpp): Bits per pixel
+/// - r9 (memory_map_addr): E820 memory map address
 ///
-/// Initializes the VGA terminal and displays a welcome message,
+/// Initializes the VGA terminal, parses memory map, and displays system info,
 /// then halts the CPU indefinitely.
 #[no_mangle]
 pub extern "C" fn enter(
@@ -41,7 +47,8 @@ pub extern "C" fn enter(
     pitch: u32,
     width: u32,
     height: u32,
-    bpp: u32
+    bpp: u32,
+    memory_map_addr: u64
 ) -> ! {
     unsafe {
         // Set up framebuffer with info from bootloader
@@ -52,7 +59,27 @@ pub extern "C" fn enter(
         video::init();
         video::print("Welcome to Nafuraito! \0");
         video::print("A fully self-developed operating system from scratch. \0");
-        video::print("!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ \0");
+        
+        // Initialize memory map
+        // DISABLED FOR DEBUGGING - just print that we're here
+        video::print("\n\nMemory map code reached. Parameter received: \0");
+        
+        // Simple hex print of the address without using complex functions
+        let addr = memory_map_addr;
+        let hex_chars: &[u8; 16] = b"0123456789ABCDEF";
+        video::print("0x\0");
+        
+        // Print each nibble (16 nibbles for 64-bit)
+        let mut shift: i32 = 60;
+        while shift >= 0 {
+            let nibble = ((addr >> (shift as u64)) & 0xF) as usize;
+            let ch = hex_chars[nibble];
+            let s: [u8; 2] = [ch, 0];
+            video::print(core::str::from_utf8_unchecked(&s));
+            shift = shift - 4;
+        }
+        video::print("\n\0");
+        video::print("Kernel is stable.\n\0");
     }
 
     // Halt the CPU permanently
@@ -61,5 +88,57 @@ pub extern "C" fn enter(
             core::arch::asm!("cli");
             core::arch::asm!("hlt");
         }
+    }
+}
+
+/// Print a decimal number to the screen
+fn print_number(mut n: u64) {
+    if n == 0 {
+        unsafe { video::print("0\0"); }
+        return;
+    }
+    
+    let mut buf = [0u8; 21]; // Max u64 is 20 digits + null
+    let mut i: usize = 20;
+    
+    while n > 0 && i > 0 {
+        i = i.wrapping_sub(1);
+        unsafe {
+            *buf.get_unchecked_mut(i) = b'0'.wrapping_add((n % 10) as u8);
+        }
+        n /= 10;
+    }
+    
+    // Print digit by digit to avoid slice operations
+    unsafe {
+        while i < 20 {
+            let c = *buf.get_unchecked(i);
+            let s: [u8; 2] = [c, 0];
+            video::print(core::str::from_utf8_unchecked(&s));
+            i = i.wrapping_add(1);
+        }
+    }
+}
+
+/// Print a 64-bit hex value to the screen (format: 0x...)
+fn print_hex(n: u64) {
+    const HEX_CHARS: [u8; 16] = *b"0123456789ABCDEF";
+    
+    unsafe {
+        video::print("0x\0");
+    }
+    
+    // Print each nibble individually
+    let mut i: u32 = 0;
+    while i < 16 {
+        let shift = 60u32.wrapping_sub(i.wrapping_mul(4));
+        let nibble = ((n >> shift) & 0xF) as usize;
+        // Use get_unchecked since nibble is masked to 0-15
+        let c = unsafe { *HEX_CHARS.get_unchecked(nibble) };
+        let s: [u8; 2] = [c, 0];
+        unsafe {
+            video::print(core::str::from_utf8_unchecked(&s));
+        }
+        i = i.wrapping_add(1);
     }
 }

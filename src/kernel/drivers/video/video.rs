@@ -5,6 +5,8 @@
 //! - High-level safe Rust wrappers
 //! - Color constants and pixel structures
 
+#![allow(unused)]
+
 // =========================================================================
 // Pixel Structures
 // =========================================================================

@@ -10,6 +10,8 @@ extern vbe_pitch
 extern vbe_width
 extern vbe_height
 extern vbe_bpp
+extern memory_map_addr
+extern memory_map_entries
 
 bits 64
 
@@ -68,17 +70,19 @@ load_kernel:
     ; Set up stack
     mov rsp, 0x900000
     
-    ; Pass VBE info to kernel via registers (System V AMD64 calling convention)
+    ; Pass boot info to kernel via registers (System V AMD64 calling convention)
     ; rdi = framebuffer address
     ; rsi = pitch
     ; rdx = width
     ; rcx = height
     ; r8  = bpp
+    ; r9  = memory map address
     mov edi, [vbe_framebuffer_addr]
     movzx rsi, word [vbe_pitch]
     movzx rdx, word [vbe_width]
     movzx rcx, word [vbe_height]
     movzx r8, byte [vbe_bpp]
+    mov r9d, [memory_map_addr]      ; Memory map address (0x6000)
     
     ; Jump to kernel
     mov rax, KERNEL_LOAD_ADDR

@@ -4,7 +4,7 @@ BOOTLOADER_DIR = src/bootloader
 KERNEL_DIR = src/kernel
 BUILD_DIR = build
 
-.PHONY: all bootloader kernel disk_image run run-debug clean
+.PHONY: all bootloader kernel disk_image run clean
 
 all: bootloader kernel disk_image
 

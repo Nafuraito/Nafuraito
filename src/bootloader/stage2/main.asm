@@ -26,6 +26,20 @@ VBE_INFO_BLOCK      equ 0x5000      ; VBE Controller Info
 VBE_MODE_INFO       equ 0x5200      ; VBE Mode Info Block
 
 ;=============================================================================
+; E820 Memory Map Constants
+;=============================================================================
+
+MEMORY_MAP_ADDR     equ 0x6000      ; Where to store the memory map
+MAX_MEMORY_ENTRIES  equ 64          ; Maximum entries to store
+
+; E820 Memory Region Types:
+; 1 = Usable RAM
+; 2 = Reserved
+; 3 = ACPI Reclaimable
+; 4 = ACPI NVS (Non-Volatile Storage)
+; 5 = Bad Memory
+
+;=============================================================================
 ; Entry Point (16-bit Real Mode)
 ;=============================================================================
 
@@ -42,6 +56,11 @@ entry:
     ; Set video mode 3 temporarily (80x25 text mode)
     mov ax, 0x0003
     int 0x10
+
+    ;=========================================================================
+    ; E820 Memory Map Detection (must be done in Real Mode)
+    ;=========================================================================
+    call detect_memory_e820
 
     ;=========================================================================
     ; VESA Graphics Mode Setup
@@ -334,6 +353,61 @@ gdt_descriptor:
     dd gdt
 
 ;=============================================================================
+; E820 Memory Map Detection Routine (16-bit Real Mode)
+;=============================================================================
+bits 16
+
+detect_memory_e820:
+    push es
+    push bp
+    push di
+    
+    xor ax, ax
+    mov es, ax
+    
+    mov di, MEMORY_MAP_ADDR + 4     ; Skip first 4 bytes (will store entry count)
+    xor ebx, ebx                    ; EBX = 0 to start (continuation value)
+    xor bp, bp                      ; BP = entry counter
+    mov edx, 0x534D4150             ; "SMAP" signature
+
+.e820_loop:
+    mov eax, 0xE820                 ; E820 function number
+    mov ecx, 24                     ; Request 24 bytes (with extended attributes)
+    int 0x15
+    
+    jc .e820_done                   ; Carry flag set = error or end of list
+    
+    cmp eax, 0x534D4150             ; Verify "SMAP" signature returned in EAX
+    jne .e820_done
+    
+    ; Check if entry is valid (length > 0)
+    mov eax, [es:di + 8]            ; Length low dword
+    or eax, [es:di + 12]            ; OR with length high dword
+    jz .e820_skip_entry             ; Skip zero-length entries
+    
+    ; Valid entry found
+    inc bp                          ; Increment entry count
+    add di, 24                      ; Move to next entry slot
+    
+    ; Check if we've reached maximum entries
+    cmp bp, MAX_MEMORY_ENTRIES
+    jge .e820_done
+
+.e820_skip_entry:
+    test ebx, ebx                   ; EBX = 0 means this was the last entry
+    jnz .e820_loop                  ; Continue if more entries
+
+.e820_done:
+    ; Store entry count at the beginning of the memory map
+    mov [MEMORY_MAP_ADDR], bp
+    mov [memory_map_entries], bp    ; Also store in our variable
+    
+    pop di
+    pop bp
+    pop es
+    ret
+
+;=============================================================================
 ; VBE Information Storage (accessible from kernel)
 ;=============================================================================
 section .data
@@ -343,3 +417,13 @@ vbe_pitch:              dw 0    ; Bytes per scanline
 vbe_width:              dw 0    ; Screen width in pixels
 vbe_height:             dw 0    ; Screen height in pixels
 vbe_bpp:                db 0    ; Bits per pixel
+
+;=============================================================================
+; Memory Map Information (accessible from kernel)
+;=============================================================================
+align 4
+global memory_map_addr
+global memory_map_entries
+
+memory_map_addr:        dd MEMORY_MAP_ADDR  ; Address where memory map is stored
+memory_map_entries:     dw 0                ; Number of entries in memory map
