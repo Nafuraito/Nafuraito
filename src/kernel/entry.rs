@@ -1,7 +1,7 @@
 //! Nafuraito Kernel Entry Point
 //! 
 //! This is the main entry point for the Nafuraito operating system kernel.
-//! It initializes the VGA display, memory management, and halts the CPU.
+//! It initializes the VGA display, memory management, GDT/TSS, and halts the CPU.
 
 #![crate_type = "staticlib"]
 #![no_std]
@@ -17,6 +17,9 @@ use core::fmt::Write;
 
 #[path = "memory/mod.rs"]
 mod memory;
+
+#[path = "gdt/mod.rs"]
+mod gdt;
 
 // / Panic handler - halts the CPU on panic
 #[panic_handler]
@@ -58,11 +61,28 @@ pub extern "C" fn enter(
         
         video::init();
         video::print("Welcome to Nafuraito! \0");
-        video::print("A fully self-developed operating system from scratch. \0");
+        video::print("A fully self-developed operating system from scratch.\n\0");
+        
+        // Initialize GDT and TSS
+        video::print("\nInitializing GDT and TSS... \0");
+        gdt::init();
+        video::print("OK\n\0");
+        
+        // Print GDT info
+        video::print("  Kernel Code Selector: 0x\0");
+        print_hex_byte(gdt::KERNEL_CODE_SELECTOR as u8);
+        video::print("\n  Kernel Data Selector: 0x\0");
+        print_hex_byte(gdt::KERNEL_DATA_SELECTOR as u8);
+        video::print("\n  User Code Selector:   0x\0");
+        print_hex_byte((gdt::USER_CODE_SELECTOR & 0xFF) as u8);
+        video::print("\n  User Data Selector:   0x\0");
+        print_hex_byte((gdt::USER_DATA_SELECTOR & 0xFF) as u8);
+        video::print("\n  TSS Selector:         0x\0");
+        print_hex_byte(gdt::TSS_SELECTOR as u8);
+        video::print("\n\0");
         
         // Initialize memory map
-        // DISABLED FOR DEBUGGING - just print that we're here
-        video::print("\n\nMemory map code reached. Parameter received: \0");
+        video::print("\nMemory map address: \0");
         
         // Simple hex print of the address without using complex functions
         let addr = memory_map_addr;
@@ -79,7 +99,7 @@ pub extern "C" fn enter(
             shift = shift - 4;
         }
         video::print("\n\0");
-        video::print("Kernel is stable.\n\0");
+        video::print("\nKernel is stable.\n\0");
     }
 
     // Halt the CPU permanently
@@ -88,6 +108,17 @@ pub extern "C" fn enter(
             core::arch::asm!("cli");
             core::arch::asm!("hlt");
         }
+    }
+}
+
+/// Print a single byte as hex
+fn print_hex_byte(b: u8) {
+    const HEX_CHARS: [u8; 16] = *b"0123456789ABCDEF";
+    let hi = (b >> 4) as usize;
+    let lo = (b & 0x0F) as usize;
+    unsafe {
+        let s: [u8; 3] = [HEX_CHARS[hi], HEX_CHARS[lo], 0];
+        video::print(core::str::from_utf8_unchecked(&s));
     }
 }
 

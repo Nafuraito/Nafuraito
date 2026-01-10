@@ -342,15 +342,45 @@ long_mode_start:
 ; Global Descriptor Table
 ;=============================================================================
 ; GDT must be in the same section to be accessible in real mode
+; 
+; Layout:
+;   0x00 - Null descriptor
+;   0x08 - Kernel code segment (64-bit, Ring 0)
+;   0x10 - Kernel data segment (Ring 0)
+;   0x18 - User data segment (Ring 3)
+;   0x20 - User code segment (64-bit, Ring 3)
+;
+; Note: User data comes before user code for syscall/sysret compatibility
 align 8
 gdt:
-    dq 0x0000000000000000   ; Null descriptor
-    dq 0x00AF9A000000FFFF   ; 64-bit code segment
-    dq 0x00CF92000000FFFF   ; Data segment
+    ; Null descriptor (0x00)
+    dq 0x0000000000000000
+    
+    ; Kernel code segment (0x08) - 64-bit, Ring 0
+    ; Base=0, Limit=0xFFFFF, Access=0x9A (P=1, DPL=0, S=1, E=1, RW=1)
+    ; Flags=0xA (G=1, L=1, D=0)
+    dq 0x00AF9A000000FFFF
+    
+    ; Kernel data segment (0x10) - Ring 0
+    ; Base=0, Limit=0xFFFFF, Access=0x92 (P=1, DPL=0, S=1, E=0, RW=1)
+    ; Flags=0xC (G=1, D=1)
+    dq 0x00CF92000000FFFF
+    
+    ; User data segment (0x18) - Ring 3
+    ; Base=0, Limit=0xFFFFF, Access=0xF2 (P=1, DPL=3, S=1, E=0, RW=1)
+    ; Flags=0xC (G=1, D=1)
+    dq 0x00CFF2000000FFFF
+    
+    ; User code segment (0x20) - 64-bit, Ring 3
+    ; Base=0, Limit=0xFFFFF, Access=0xFA (P=1, DPL=3, S=1, E=1, RW=1)
+    ; Flags=0xA (G=1, L=1, D=0)
+    dq 0x00AFFA000000FFFF
+
+gdt_end:
 
 gdt_descriptor:
-    dw gdt_descriptor - gdt - 1
-    dd gdt
+    dw gdt_end - gdt - 1    ; GDT size - 1
+    dq gdt                  ; GDT base address (use dq for 64-bit compatibility)
 
 ;=============================================================================
 ; E820 Memory Map Detection Routine (16-bit Real Mode)

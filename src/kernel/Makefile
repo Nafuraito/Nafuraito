@@ -16,11 +16,12 @@ all: $(BUILD_DIR) kernel.bin
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-kernel.bin: entry.o entry_rs.o vga.o
+kernel.bin: entry.o entry_rs.o vga.o gdt.o
 	$(LD) -m elf_x86_64 -T linker.ld \
 		$(BUILD_DIR)/entry.o \
 		$(BUILD_DIR)/entry_rs.o \
 		$(BUILD_DIR)/vga.o \
+		$(BUILD_DIR)/gdt.o \
 		-o ../../build/kernel.bin
 
 entry.o: $(BUILD_DIR)
@@ -31,6 +32,9 @@ entry_rs.o: $(BUILD_DIR)
 
 vga.o: $(BUILD_DIR)
 	$(CC) drivers/video/vga.c -o $(BUILD_DIR)/vga.o
+
+gdt.o: $(BUILD_DIR)
+	$(ASM) gdt/gdt.asm -f elf64 -o $(BUILD_DIR)/gdt.o
 
 clean:
 	rm -rf $(BUILD_DIR)

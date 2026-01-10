@@ -1,4 +1,4 @@
-# TODOS - Nafuraito OS Development Roadmap
+# TODOS - Nafuraito KERNEL Development
 
 ---
 
@@ -18,10 +18,12 @@
 ### Global Descriptor Table (GDT)
 - [x] Define kernel code segment (ring 0)
 - [x] Define kernel data segment (ring 0)
-- [ ] Define user code segment (ring 3)
-- [ ] Define user data segment (ring 3)
-- [ ] Task State Segment (TSS) for each CPU
+- [x] Define user code segment (ring 3)
+- [x] Define user data segment (ring 3)
+- [x] Task State Segment (TSS) for each CPU
 - [x] GDT loading routine (`lgdt`)
+- [x] TSS loading routine (`ltr`)
+- [x] Segment reload routine
 
 ### Interrupt Descriptor Table (IDT)
 - [ ] Define all 256 interrupt vectors
