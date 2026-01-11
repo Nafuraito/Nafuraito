@@ -1,9 +1,15 @@
 # Nafuraito Bootloader Build Configuration
 
 ASM = nasm
+CC = gcc
 LD = ld
 
 BUILD_DIR = ../../build
+
+# C compiler flags for freestanding environment
+CFLAGS = -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
+         -mno-red-zone -mcmodel=kernel -mno-sse -mno-sse2 -fno-pic -fno-pie \
+         -O2 -Wall -Wextra -Wno-unused-parameter
 
 .PHONY: all clean
 
@@ -14,9 +20,11 @@ stage1: $(BUILD_DIR)
 
 stage2: $(BUILD_DIR)/stage2
 	$(ASM) -f elf64 stage2/main.asm -o $(BUILD_DIR)/stage2/main.o
-	$(ASM) -f elf64 stage2/kernel_loader_64_bit.asm -o $(BUILD_DIR)/stage2/kernel_loader.o
+	$(ASM) -f elf64 stage2/bridge.asm -o $(BUILD_DIR)/stage2/bridge.o
+	$(CC) $(CFLAGS) -c stage2/kernel_loader.c -o $(BUILD_DIR)/stage2/kernel_loader.o
 	$(LD) -m elf_x86_64 -T linker.ld --oformat binary \
 		$(BUILD_DIR)/stage2/main.o \
+		$(BUILD_DIR)/stage2/bridge.o \
 		$(BUILD_DIR)/stage2/kernel_loader.o \
 		-o $(BUILD_DIR)/stage2.bin
 
