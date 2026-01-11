@@ -21,6 +21,9 @@ mod memory;
 #[path = "gdt/mod.rs"]
 mod gdt;
 
+#[path = "idt/mod.rs"]
+mod idt;
+
 // / Panic handler - halts the CPU on panic
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -60,12 +63,16 @@ pub extern "C" fn enter(
         }
         
         video::init();
-        video::print("Welcome to Nafuraito! \0");
-        video::print("A fully self-developed operating system from scratch.\n\0");
+        video::print("Welcome to Nafuraito!\n\0");
         
         // Initialize GDT and TSS
         video::print("\nInitializing GDT and TSS... \0");
         gdt::init();
+        video::print("OK\n\0");
+        
+        // Initialize IDT
+        video::print("Initializing IDT... \0");
+        idt::init();
         video::print("OK\n\0");
         
         // Print GDT info

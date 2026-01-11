@@ -16,12 +16,13 @@ all: $(BUILD_DIR) kernel.bin
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-kernel.bin: entry.o entry_rs.o vga.o gdt.o
+kernel.bin: entry.o entry_rs.o vga.o gdt.o idt.o
 	$(LD) -m elf_x86_64 -T linker.ld \
 		$(BUILD_DIR)/entry.o \
 		$(BUILD_DIR)/entry_rs.o \
 		$(BUILD_DIR)/vga.o \
 		$(BUILD_DIR)/gdt.o \
+		$(BUILD_DIR)/idt.o \
 		-o ../../build/kernel.bin
 
 entry.o: $(BUILD_DIR)
@@ -35,6 +36,9 @@ vga.o: $(BUILD_DIR)
 
 gdt.o: $(BUILD_DIR)
 	$(ASM) gdt/gdt.asm -f elf64 -o $(BUILD_DIR)/gdt.o
+
+idt.o: $(BUILD_DIR)
+	$(ASM) idt/idt.asm -f elf64 -o $(BUILD_DIR)/idt.o
 
 clean:
 	rm -rf $(BUILD_DIR)
