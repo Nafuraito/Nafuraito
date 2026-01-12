@@ -9,7 +9,7 @@ BUILD_DIR = ../../build
 # C compiler flags for freestanding environment
 CFLAGS = -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
          -mno-red-zone -mcmodel=kernel -mno-sse -mno-sse2 -fno-pic -fno-pie \
-         -O2 -Wall -Wextra -Wno-unused-parameter
+         -O2 -Wall -Wextra -Wno-unused-parameter -Werror -Wpedantic
 
 .PHONY: all clean
 

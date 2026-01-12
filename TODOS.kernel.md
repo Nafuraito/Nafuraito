@@ -12,7 +12,7 @@
 - [x] Switch to Long Mode (64-bit)
 - [x] Set up initial page tables for kernel
 - [x] Parse memory map (E820/UEFI)
-- [ ] Refactor bootloader to C
+- [x] Refactor bootloader to C
 - [ ] Multiboot2/Limine protocol support
 - [ ] UEFI boot support (alternative to BIOS)
 

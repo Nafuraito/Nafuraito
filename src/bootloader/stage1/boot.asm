@@ -6,6 +6,13 @@
 org 0x7C00
 bits 16
 
+%macro print 1
+    mov al, %1
+    mov ah, 0x0E
+    xor bh, bh
+    int 0x10
+%endmacro
+
 start:
     ; Set up segments and stack
     cli
@@ -57,6 +64,36 @@ start:
     jmp 0x0000:0x7E00
 
 disk_error:
+    print 'E'
+    print 'R'
+    print 'R'
+    print 'O'
+    print 'R'
+    print ' '
+    print 'W'
+    print 'H'
+    print 'I'
+    print 'L'
+    print 'E'
+    print ' '
+    print 'R'
+    print 'E'
+    print 'A'
+    print 'D'
+    print 'I'
+    print 'N'
+    print 'G'
+    print ' '
+    print 'F'
+    print 'R'
+    print 'O'
+    print 'M'
+    print ' '
+    print 'D'
+    print 'I'
+    print 'S'
+    print 'K'
+    print '!'
     cli
     hlt
 
