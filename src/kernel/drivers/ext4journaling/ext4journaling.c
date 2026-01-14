@@ -5,8 +5,8 @@
  * for the Nafuraito kernel.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include "../stdint.h"
+#include <stddef.h> // XXX
 #include <stdbool.h>
 
 /* EXT4 Magic Number */

@@ -10,6 +10,10 @@
 
 use core::panic::PanicInfo;
 
+#[path = "handlers.rs"]
+mod handlers;
+use handlers::*;
+
 #[path = "drivers/video/video.rs"]
 mod video;
 use video::COLOR_PURPLE;
@@ -24,16 +28,9 @@ mod gdt;
 #[path = "idt/mod.rs"]
 mod idt;
 
-// / Panic handler - halts the CPU on panic
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {
-        unsafe {
-            core::arch::asm!("cli");
-            core::arch::asm!("hlt");
-        }
-    }
-}
+#[path = "drivers/pic/pic.rs"]
+mod e_pic;
+use e_pic as pic;
 
 /// Kernel entry point called from assembly/bootloader
 /// 
@@ -74,7 +71,20 @@ pub extern "C" fn enter(
         video::print("Initializing IDT... \0");
         idt::init();
         video::print("OK\n\0");
+
+        // Init PIC
+        video::print("Initializing PIC... \0");
+        pic::remap(0x20, 0x28); // Inits PIC
+        video::print("OK\n\0");
+
+        // Enable Interrupts
+        // After idt::init() and pic::init()
+        unsafe {
+            core::arch::asm!("sti");  // Enable interrupts
+        }
+        video::print("Interrupts enabled\n\0");
         
+
         // Print GDT info
         video::print("  Kernel Code Selector: 0x\0");
         print_hex_byte(gdt::KERNEL_CODE_SELECTOR as u8);

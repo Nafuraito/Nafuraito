@@ -55,7 +55,7 @@
 - [x] IST (Interrupt Stack Table) support for critical exceptions
 
 ### Programmable Interrupt Controller (PIC/APIC)
-- [ ] Legacy 8259 PIC initialization
+- [x] Legacy 8259 PIC initialization
 - [ ] PIC remapping (IRQ 0-15 → INT 32-47)
 - [ ] PIC masking/unmasking
 - [ ] EOI (End of Interrupt) handling
@@ -933,16 +933,35 @@
 
 ---
 
+## Application Programming Library
+
+### Foundation
+- [ ] Structure
+- [ ] create Modules and functions (w/o implementations)
+- [ ] create main renderer
+  - [ ] call render funcs of all elements to get rendered pixel for each element
+  - [ ] overlay pixel based on the order (z-index) of elements and respecting positions
+  - [ ] send the rendered pixels to OS
+
+### Lib
+- [ ] create GUI elements (not implemented)
+- [ ] implement window element
+- [ ] implement most important GUI Elements: text, titles, buttons, checkboxes, inputfields, boxes (divs)
+- [ ] implement advanced styling and config possibilities
+- [ ] implement way more GUI elements
+- [ ] define and implement helper functions for user and lib
+
 ## MILESTONES
 
-1. **M1 - Boot**: ~~Bootloader loads kernel, prints "Hello World"~~ ✅
-2. **M2 - Interrupts**: GDT, IDT, PIC working, timer interrupt firing
-3. **M3 - Memory**: Physical and virtual memory management complete
-4. **M4 - Storage**: Can read/write to disk (ATA/AHCI)
-5. **M5 - File System**: VFS layer with ext2/FAT support
-6. **M6 - Processes**: Process creation, scheduling, context switching
-7. **M7 - User Space**: User mode, system calls, ELF loading
-8. **M8 - Shell**: Working command-line shell
-9. **M9 - Network**: TCP/IP stack with basic connectivity
-10. **M10 - GUI**: Basic windowing system
-11. **M11 - Self-Hosting**: Can compile itself on itself
+1.  **Boot**: ~~Bootloader loads kernel, prints "Hello World"~~ ✅
+2.  **Interrupts**: GDT, IDT, PIC working, timer interrupt firing
+3.  **Memory**: Physical and virtual memory management complete
+4.  **Storage**: Can read/write to disk (ATA/AHCI)
+5.  **File System**: VFS layer with ext2/FAT support
+6.  **Processes**: Process creation, scheduling, context switching
+7.  **User Space**: User mode, system calls, ELF loading
+8.  **Shell**: Working command-line shell
+9.  **Network**: TCP/IP stack with basic connectivity
+10. **GUI**: Basic windowing system
+11. **Application Programming Library**: Rust based lib for pogramming apps for Nafuraito
+12. **Self-Hosting**: Can compile itself on itself
