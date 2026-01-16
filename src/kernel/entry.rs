@@ -10,9 +10,16 @@
 
 use core::panic::PanicInfo;
 
-#[path = "handlers.rs"]
-mod handlers;
-use handlers::*;
+/// Panic handler for the kernel
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    loop {
+        unsafe {
+            core::arch::asm!("cli");
+            core::arch::asm!("hlt");
+        }
+    }
+}
 
 #[path = "drivers/video/video.rs"]
 mod video;
@@ -29,8 +36,7 @@ mod gdt;
 mod idt;
 
 #[path = "drivers/pic/pic.rs"]
-mod e_pic;
-use e_pic as pic;
+mod pic;
 
 /// Kernel entry point called from assembly/bootloader
 /// 

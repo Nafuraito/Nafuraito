@@ -3,6 +3,7 @@
 RUSTC = rustc --emit obj -C panic=abort --target x86_64-unknown-linux-gnu \
         -C code-model=kernel -C relocation-model=static \
         -C opt-level=2 -C overflow-checks=no -C debug-assertions=no 
+
 ASM = nasm
 LD = ld
 CC = gcc -m64 -nostdlib -fno-stack-protector -ffreestanding -c -Wall -Werror -Wpedantic
@@ -16,6 +17,7 @@ all: $(BUILD_DIR) kernel.bin
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
+# Note: pic.rs is included as a module in entry.rs, so it's compiled together
 kernel.bin: compile
 	$(LD) -m elf_x86_64 -T linker.ld \
 		$(BUILD_DIR)/entry.o \
@@ -23,7 +25,6 @@ kernel.bin: compile
 		$(BUILD_DIR)/vga.o \
 		$(BUILD_DIR)/gdt.o \
 		$(BUILD_DIR)/idt.o \
-		$(BUILD_DIR)/pic.o \
 		-o ../../build/kernel.bin
 
 compile: $(BUILD_DIR)
@@ -36,8 +37,6 @@ compile: $(BUILD_DIR)
 	$(ASM) gdt/gdt.asm -f elf64 -o $(BUILD_DIR)/gdt.o
 
 	$(ASM) idt/idt.asm -f elf64 -o $(BUILD_DIR)/idt.o
-
-	$(RUSTC) drivers/pic/pic.rs -o $(BUILD_DIR)/pic.o
 
 clean:
 	rm -rf $(BUILD_DIR)

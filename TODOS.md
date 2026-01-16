@@ -56,12 +56,12 @@
 
 ### Programmable Interrupt Controller (PIC/APIC)
 - [x] Legacy 8259 PIC initialization
-- [ ] PIC remapping (IRQ 0-15 → INT 32-47)
-- [ ] PIC masking/unmasking
-- [ ] EOI (End of Interrupt) handling
-- [ ] APIC detection and initialization
-- [ ] Local APIC setup
-- [ ] I/O APIC setup
+- [x] PIC remapping (IRQ 0-15 → INT 32-47)
+- [x] PIC masking/unmasking
+- [x] EOI (End of Interrupt) handling
+- [x] APIC detection and initialization
+- [x] Local APIC setup
+- [x] I/O APIC setup
 - [ ] MSI/MSI-X support for modern devices
 
 ---

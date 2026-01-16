@@ -1,18 +1,15 @@
-#![no_std]
-#![no_main]
-#![allow(unused)]
+//! Global panic handler for Nafuraito kernel
 
 use core::panic::PanicInfo;
 
-mod handlers {
-    // / Panic handler - halts the CPU on panic
-    #[panic_handler]
-    pub fn panic(_info: &PanicInfo) -> ! {
-        loop {
-            unsafe {
-                core::arch::asm!("cli");
-                core::arch::asm!("hlt");
-            }
+/// Panic handler - halts the CPU on panic
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    // TODO: Print panic info to screen when video module is available
+    loop {
+        unsafe {
+            core::arch::asm!("cli");
+            core::arch::asm!("hlt");
         }
     }
 }

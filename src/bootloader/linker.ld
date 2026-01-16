@@ -6,26 +6,31 @@ SECTIONS
     . = 0x7E00;
 
     .text : {
-        /* Ensure entry point is at the very beginning */
+        /* 16-bit entry point must be at the very beginning */
         *(.text.entry)
         *(.text)
     }
 
-    .data : {
-        *(.data)
-    }
-
     .rodata : {
         *(.rodata)
+        *(.rodata.*)
+    }
+
+    .data : {
+        *(.data)
+        *(.data.*)
     }
 
     .bss : {
         *(.bss)
+        *(.bss.*)
+        *(COMMON)
     }
 
     /DISCARD/ : {
         *(.note*)
         *(.comment)
         *(.eh_frame)
+        *(.eh_frame_hdr)
     }
 }
