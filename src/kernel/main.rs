@@ -78,22 +78,32 @@ pub unsafe extern "C" fn memmove(dest: *mut u8, src: *const u8, n: usize) -> *mu
 // =============================================================================
 
 // Video library (libvideo.a)
-extern "C" {
-    fn set_framebuffer_info(addr: u32, pitch: u32, width: u32, height: u32, bpp: u32);
-    fn initialize_vga_graphics();
-    fn writestring_vga(data: *const i8);
+mod video {
+    extern "C" {
+        pub fn set_framebuffer_info(addr: u32, pitch: u32, width: u32, height: u32, bpp: u32);
+        pub fn initialize_vga_graphics();
+        pub fn writestring_vga(data: *const i8);
+    }
+    
+    pub unsafe fn print(s: &str) {
+        writestring_vga(s.as_ptr() as *const i8);
+    }
 }
 
 // GDT library (libgdt.a) - calls the Rust init through asm
-extern "C" {
-    fn gdt_load(gdt_ptr: *const u8);
-    fn reload_segments();
-    fn tss_load(selector: u16);
+mod gdt {
+    extern "C" {
+        pub fn gdt_load(gdt_ptr: *const u8);
+        pub fn reload_segments();
+        pub fn tss_load(selector: u16);
+    }
 }
 
 // IDT library (libidt.a) - calls the Rust init through asm
-extern "C" {
-    fn idt_load(idt_ptr: *const u8);
+mod idt {
+    extern "C" {
+        pub fn idt_load(idt_ptr: *const u8);
+    }
 }
 
 // =============================================================================
@@ -116,11 +126,6 @@ const TSS_SELECTOR: u16 = 0x28;
 // Helper Functions
 // =============================================================================
 
-/// Print a null-terminated string via VGA
-unsafe fn print(s: &str) {
-    writestring_vga(s.as_ptr() as *const i8);
-}
-
 /// Print a single byte as hex
 fn print_hex_byte(b: u8) {
     const HEX_CHARS: [u8; 16] = *b"0123456789ABCDEF";
@@ -128,7 +133,7 @@ fn print_hex_byte(b: u8) {
     let lo = (b & 0x0F) as usize;
     unsafe {
         let s: [u8; 3] = [HEX_CHARS[hi], HEX_CHARS[lo], 0];
-        print(core::str::from_utf8_unchecked(&s));
+        video::print(core::str::from_utf8_unchecked(&s));
     }
 }
 
@@ -315,9 +320,9 @@ unsafe fn gdt_init() {
     GDT_POINTER.limit = (size_of::<Gdt>() - 1) as u16;
     GDT_POINTER.base = &raw const GDT as u64;
     
-    gdt_load(&raw const GDT_POINTER as *const u8);
-    reload_segments();
-    tss_load(TSS_SELECTOR);
+    gdt::gdt_load(&raw const GDT_POINTER as *const u8);
+    gdt::reload_segments();
+    gdt::tss_load(TSS_SELECTOR);
 }
 
 // =============================================================================
@@ -416,7 +421,7 @@ unsafe fn idt_init() {
     
     IDT_POINTER.limit = (size_of::<Idt>() - 1) as u16;
     IDT_POINTER.base = &raw const IDT as u64;
-    idt_load(&raw const IDT_POINTER as *const u8);
+    idt::idt_load(&raw const IDT_POINTER as *const u8);
 }
 
 // =============================================================================
@@ -433,7 +438,7 @@ fn handler_print(s: &str) {
             PRINT_BUFFER[i] = bytes[i];
         }
         PRINT_BUFFER[len] = 0;
-        writestring_vga(PRINT_BUFFER.as_ptr() as *const i8);
+        video::writestring_vga(PRINT_BUFFER.as_ptr() as *const i8);
     }
 }
 
@@ -449,7 +454,7 @@ fn handler_print_hex(num: u64) {
             HEX_BUFFER[2 + i] = HEX_CHARS[digit];
         }
         HEX_BUFFER[18] = 0;
-        writestring_vga(HEX_BUFFER.as_ptr() as *const i8);
+        video::writestring_vga(HEX_BUFFER.as_ptr() as *const i8);
     }
 }
 
@@ -528,57 +533,60 @@ pub extern "C" fn enter(
     unsafe {
         // Set up framebuffer
         if fb_addr != 0 {
-            set_framebuffer_info(fb_addr, pitch, width, height, bpp);
+            video::set_framebuffer_info(fb_addr, pitch, width, height, bpp);
         }
         
-        initialize_vga_graphics();
-        print("Welcome to Nafuraito!\n\0");
+        video::initialize_vga_graphics();
+        video::print("Welcome to Nafuraito OS!\n\0");
         
         // Initialize GDT and TSS
-        print("\nInitializing GDT and TSS... \0");
+        video::print("\nInitializing GDT and TSS... \0");
         gdt_init();
-        print("OK\n\0");
+        video::print("OK\n\0");
         
         // Initialize IDT
-        print("Initializing IDT... \0");
+        video::print("Initializing IDT... \0");
         idt_init();
-        print("OK\n\0");
+        video::print("OK\n\0");
 
         // Init PIC
-        print("Initializing PIC... \0");
+        video::print("Initializing PIC... \0");
         pic_remap(0x20, 0x28);
-        print("OK\n\0");
+        video::print("OK\n\0");
 
         // Enable Interrupts
         core::arch::asm!("sti");
-        print("Interrupts enabled\n\0");
+        video::print("Interrupts enabled\n\0");
+
+        video::print("\n\0");
+        video::print("GDT Info:\n\0");
         
         // Print GDT info
-        print("  Kernel Code Selector: 0x\0");
+        video::print("  Kernel Code Selector: 0x\0");
         print_hex_byte(KERNEL_CODE_SELECTOR as u8);
-        print("\n  Kernel Data Selector: 0x\0");
+        video::print("\n  Kernel Data Selector: 0x\0");
         print_hex_byte(KERNEL_DATA_SELECTOR as u8);
-        print("\n  User Code Selector:   0x\0");
+        video::print("\n  User Code Selector:   0x\0");
         print_hex_byte((USER_CODE_SELECTOR & 0xFF) as u8);
-        print("\n  User Data Selector:   0x\0");
+        video::print("\n  User Data Selector:   0x\0");
         print_hex_byte((USER_DATA_SELECTOR & 0xFF) as u8);
-        print("\n  TSS Selector:         0x\0");
+        video::print("\n  TSS Selector:         0x\0");
         print_hex_byte(TSS_SELECTOR as u8);
-        print("\n\0");
+        video::print("\n\0");
         
         // Print memory map address
-        print("\nMemory map address: 0x\0");
+        video::print("\nMemory map address: 0x\0");
         let hex_chars: &[u8; 16] = b"0123456789ABCDEF";
         let mut shift: i32 = 60;
         while shift >= 0 {
             let nibble = ((memory_map_addr >> (shift as u64)) & 0xF) as usize;
             let ch = hex_chars[nibble];
             let s: [u8; 2] = [ch, 0];
-            print(core::str::from_utf8_unchecked(&s));
+            video::print(core::str::from_utf8_unchecked(&s));
             shift -= 4;
         }
-        print("\n\0");
-        print("\nKernel is stable.\n\0");
+        video::print("\n\0");
+        video::print("\nKernel is stable.\n\0");
     }
 
     loop {

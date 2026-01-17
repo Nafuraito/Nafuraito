@@ -27,12 +27,9 @@ LIBMEMORY = $(BUILD_DIR)/memory/libmemory.a
 
 ALL_LIBS = $(LIBVIDEO) $(LIBGDT) $(LIBIDT)
 
-.PHONY: all clean libs drivers gdt idt memory
+.PHONY: all clean libs drivers gdt idt memory compile
 
-all: $(BUILD_DIR) libs kernel.bin
-
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+all: libs compile
 
 # Build all libraries
 libs: drivers gdt idt memory
@@ -49,8 +46,11 @@ idt:
 memory:
 	$(MAKE) -C $(MEMORY_DIR)
 
-# Compile kernel entry assembly and main Rust file
-kernel.bin: libs compile
+# Compile kernel entry and main, then link
+compile: libs
+	@mkdir -p $(BUILD_DIR)
+	$(ASM) entry.asm -f elf64 -o $(BUILD_DIR)/entry.o
+	$(RUSTC) main.rs -o $(BUILD_DIR)/main.o
 	$(LD) -m elf_x86_64 -T linker.ld \
 		$(BUILD_DIR)/entry.o \
 		$(BUILD_DIR)/main.o \
@@ -58,10 +58,6 @@ kernel.bin: libs compile
 		$(BUILD_DIR)/gdt/gdt.o \
 		$(BUILD_DIR)/idt/idt.o \
 		-o $(ROOT_BUILD_DIR)/kernel.bin
-
-compile: $(BUILD_DIR)
-	$(ASM) entry.asm -f elf64 -o $(BUILD_DIR)/entry.o
-	$(RUSTC) main.rs -o $(BUILD_DIR)/main.o
 
 clean:
 	rm -rf $(BUILD_DIR)

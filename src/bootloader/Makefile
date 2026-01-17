@@ -11,7 +11,7 @@ CFLAGS = -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
          -mno-red-zone -mcmodel=kernel -mno-sse -mno-sse2 -fno-pic -fno-pie \
          -O2 -Wall -Wextra -Wno-unused-parameter -Werror -Wpedantic
 
-.PHONY: all clean
+.PHONY: all clean stage1 stage2
 
 all: stage1 stage2
 
