@@ -5,63 +5,63 @@
 ## PHASE 1: CORE KERNEL FOUNDATION
 
 ### Bootloader
-- [x] Stage 1: MBR/GPT boot sector (512 bytes)
-- [x] Stage 2: Load kernel from disk
-- [x] A20 line enablement
-- [x] Switch to Protected Mode (32-bit)
-- [x] Switch to Long Mode (64-bit)
-- [x] Set up initial page tables for kernel
-- [x] Parse memory map (E820/UEFI)
-- [x] Refactor bootloader to C
+- [X] Stage 1: MBR/GPT boot sector (512 bytes)
+- [X] Stage 2: Load kernel from disk
+- [X] A20 line enablement
+- [X] Switch to Protected Mode (32-bit)
+- [X] Switch to Long Mode (64-bit)
+- [X] Set up initial page tables for kernel
+- [X] Parse memory map (E820/UEFI)
+- [X] Refactor bootloader to C
 - [ ] Multiboot2/Limine protocol support
 - [ ] UEFI boot support (alternative to BIOS)
 
 ### Global Descriptor Table (GDT)
-- [x] Define kernel code segment (ring 0)
-- [x] Define kernel data segment (ring 0)
-- [x] Define user code segment (ring 3)
-- [x] Define user data segment (ring 3)
-- [x] Task State Segment (TSS) for each CPU
-- [x] GDT loading routine (`lgdt`)
-- [x] TSS loading routine (`ltr`)
-- [x] Segment reload routine
+- [X] Define kernel code segment (ring 0)
+- [X] Define kernel data segment (ring 0)
+- [X] Define user code segment (ring 3)
+- [X] Define user data segment (ring 3)
+- [X] Task State Segment (TSS) for each CPU
+- [X] GDT loading routine (`lgdt`)
+- [X] TSS loading routine (`ltr`)
+- [X] Segment reload routine
 
 ### Interrupt Descriptor Table (IDT)
-- [x] Define all 256 interrupt vectors
-- [x] CPU exception handlers (0-31):
-  - [x] #DE - Divide Error (0)
-  - [x] #DB - Debug Exception (1)
-  - [x] #NMI - Non-Maskable Interrupt (2)
-  - [x] #BP - Breakpoint (3)
-  - [x] #OF - Overflow (4)
-  - [x] #BR - BOUND Range Exceeded (5)
-  - [x] #UD - Invalid Opcode (6)
-  - [x] #NM - Device Not Available (7)
-  - [x] #DF - Double Fault (8)
-  - [x] #TS - Invalid TSS (10)
-  - [x] #NP - Segment Not Present (11)
-  - [x] #SS - Stack-Segment Fault (12)
-  - [x] #GP - General Protection Fault (13)
-  - [x] #PF - Page Fault (14)
-  - [x] #MF - x87 FPU Error (16)
-  - [x] #AC - Alignment Check (17)
-  - [x] #MC - Machine Check (18)
-  - [x] #XM - SIMD Floating-Point Exception (19)
-  - [x] #VE - Virtualization Exception (20)
-  - [x] #CP - Control Protection Exception (21)
-- [x] Hardware interrupt handlers (32-47 for legacy PIC, or APIC)
-- [x] Software interrupt handler (syscall)
-- [x] IDT loading routine (`lidt`)
-- [x] IST (Interrupt Stack Table) support for critical exceptions
+- [X] Define all 256 interrupt vectors
+- [X] CPU exception handlers (0-31):
+  - [X] #DE - Divide Error (0)
+  - [X] #DB - Debug Exception (1)
+  - [X] #NMI - Non-Maskable Interrupt (2)
+  - [X] #BP - Breakpoint (3)
+  - [X] #OF - Overflow (4)
+  - [X] #BR - BOUND Range Exceeded (5)
+  - [X] #UD - Invalid Opcode (6)
+  - [X] #NM - Device Not Available (7)
+  - [X] #DF - Double Fault (8)
+  - [X] #TS - Invalid TSS (10)
+  - [X] #NP - Segment Not Present (11)
+  - [X] #SS - Stack-Segment Fault (12)
+  - [X] #GP - General Protection Fault (13)
+  - [X] #PF - Page Fault (14)
+  - [X] #MF - x87 FPU Error (16)
+  - [X] #AC - Alignment Check (17)
+  - [X] #MC - Machine Check (18)
+  - [X] #XM - SIMD Floating-Point Exception (19)
+  - [X] #VE - Virtualization Exception (20)
+  - [X] #CP - Control Protection Exception (21)
+- [X] Hardware interrupt handlers (32-47 for legacy PIC, or APIC)
+- [X] Software interrupt handler (syscall)
+- [X] IDT loading routine (`lidt`)
+- [X] IST (Interrupt Stack Table) support for critical exceptions
 
 ### Programmable Interrupt Controller (PIC/APIC)
-- [x] Legacy 8259 PIC initialization
-- [x] PIC remapping (IRQ 0-15 → INT 32-47)
-- [x] PIC masking/unmasking
-- [x] EOI (End of Interrupt) handling
-- [x] APIC detection and initialization
-- [x] Local APIC setup
-- [x] I/O APIC setup
+- [X] Legacy 8259 PIC initialization
+- [X] PIC remapping (IRQ 0-15 → INT 32-47)
+- [X] PIC masking/unmasking
+- [X] EOI (End of Interrupt) handling
+- [X] APIC detection and initialization
+- [X] Local APIC setup
+- [X] I/O APIC setup
 - [ ] MSI/MSI-X support for modern devices
 
 ---
@@ -80,7 +80,7 @@
 - [ ] NUMA awareness (multi-socket systems)
 
 ### Virtual Memory Manager (VMM)
-- [x] 4-level paging (PML4 → PDPT → PD → PT)
+- [X] 4-level paging (PML4 → PDPT → PD → PT)
 - [ ] 5-level paging support (LA57) for large memory
 - [ ] Page table creation/destruction
 - [ ] Virtual address mapping (`map_page`)
@@ -343,9 +343,9 @@
 - [ ] Standard VGA modes (320x200, 640x480)
 
 ### VESA/VBE
-- [x] VBE mode enumeration
-- [x] VBE mode setting
-- [x] Linear framebuffer access
+- [X] VBE mode enumeration
+- [X] VBE mode setting
+- [X] Linear framebuffer access
 - [ ] EDID parsing (monitor detection)
 
 ### GOP (UEFI Graphics)
@@ -353,10 +353,10 @@
 - [ ] Framebuffer setup
 
 ### Framebuffer Driver
-- [x] Generic framebuffer interface
-- [x] Pixel plotting
-- [x] Line drawing
-- [x] Rectangle drawing
+- [X] Generic framebuffer interface
+- [X] Pixel plotting
+- [X] Line drawing
+- [X] Rectangle drawing
 - [ ] Bitmap blitting
 - [ ] Hardware scrolling
 - [ ] Double buffering
@@ -370,7 +370,7 @@
 - [ ] Bochs/QEMU BGA display
 
 ### Font Rendering
-- [x] Built-in bitmap fonts
+- [X] Built-in bitmap fonts
 - [ ] PSF font loading
 - [ ] TrueType/OpenType support (FreeType)
 - [ ] Anti-aliasing
@@ -381,11 +381,11 @@
 ## DRIVERS: STORAGE
 
 ### ATA/IDE
-- [x] PIO mode read/write
+- [X] PIO mode read/write
 - [ ] DMA mode read/write
 - [ ] Drive detection
 - [ ] IDENTIFY command
-- [x] LBA28 addressing
+- [X] LBA28 addressing
 - [ ] LBA48 addressing
 - [ ] ATAPI support (CD/DVD)
 
@@ -442,7 +442,7 @@
 ### ext Family
 - [ ] ext2
 - [ ] ext3 (journaling)
-- [x] ext4 (extents, journaling)
+- [X] ext4 (extents, journaling)
 
 ### Other File Systems
 - [ ] ISO 9660 (CD-ROM)
@@ -895,7 +895,7 @@
 
 ### Build System
 - [ ] Cross-compiler setup (GCC/Clang)
-- [x] Makefile/build system
+- [X] Makefile/build system
 - [ ] Dependency tracking
 - [ ] Incremental builds
 - [ ] Build configuration (Kconfig-style)

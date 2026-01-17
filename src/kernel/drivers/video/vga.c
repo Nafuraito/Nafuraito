@@ -61,9 +61,10 @@ static void gfx_clear_screen(uint8_t r, uint8_t g, uint8_t b)
 	for (y = 0; y < gfx_height; y++) {
 		volatile uint8_t* row = gfx_buffer + y * gfx_pitch;
 		for (x = 0; x < gfx_width; x++) {
-			row[x * 3 + 0] = b;
-			row[x * 3 + 1] = g;
-			row[x * 3 + 2] = r;
+			row[x * gfx_bpp + 0] = b;
+			row[x * gfx_bpp + 1] = g;
+			row[x * gfx_bpp + 2] = r;
+			if (gfx_bpp == 4) row[x * gfx_bpp + 3] = 0xFF; /* Alpha */
 		}
 	}
 }
@@ -77,10 +78,11 @@ static void gfx_initialize(void)
 static void gfx_put_pixel(uint16_t x, uint16_t y, uint8_t r, uint8_t g, uint8_t b)
 {
 	if (x < gfx_width && y < gfx_height) {
-		volatile uint8_t* pixel = gfx_buffer + y * gfx_pitch + x * 3;
+		volatile uint8_t* pixel = gfx_buffer + y * gfx_pitch + x * gfx_bpp;
 		pixel[0] = b;
 		pixel[1] = g;
 		pixel[2] = r;
+		if (gfx_bpp == 4) pixel[3] = 0xFF; /* Alpha */
 	}
 }
 
@@ -94,9 +96,10 @@ static void gfx_draw_rect(uint16_t x, uint16_t y, uint16_t width, uint16_t heigh
 	for (j = y; j < y_end; j++) {
 		volatile uint8_t* row = gfx_buffer + j * gfx_pitch;
 		for (i = x; i < x_end; i++) {
-			row[i * 3 + 0] = b;
-			row[i * 3 + 1] = g;
-			row[i * 3 + 2] = r;
+			row[i * gfx_bpp + 0] = b;
+			row[i * gfx_bpp + 1] = g;
+			row[i * gfx_bpp + 2] = r;
+			if (gfx_bpp == 4) row[i * gfx_bpp + 3] = 0xFF;
 		}
 	}
 }
@@ -118,10 +121,11 @@ static void gfx_draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
 
 	for (;;) {
 		if (x0 >= 0 && x0 < (int16_t)gfx_width && y0 >= 0 && y0 < (int16_t)gfx_height) {
-			volatile uint8_t* pixel = gfx_buffer + y0 * gfx_pitch + x0 * 3;
+			volatile uint8_t* pixel = gfx_buffer + y0 * gfx_pitch + x0 * gfx_bpp;
 			pixel[0] = b;
 			pixel[1] = g;
 			pixel[2] = r;
+			if (gfx_bpp == 4) pixel[3] = 0xFF;
 		}
 		
 		if (x0 == x1 && y0 == y1) {
@@ -461,15 +465,17 @@ static void gfx_draw_char(uint16_t x, uint16_t y, char c)
 			uint16_t px = x + col;
 			uint16_t py = y + row;
 			if (px < gfx_width && py < gfx_height) {
-				volatile uint8_t* pixel = gfx_buffer + py * gfx_pitch + px * 3;
+				volatile uint8_t* pixel = gfx_buffer + py * gfx_pitch + px * gfx_bpp;
 				if (bits & (0x80 >> col)) {
 					pixel[0] = b_fg;
 					pixel[1] = g_fg;
 					pixel[2] = r_fg;
+					if (gfx_bpp == 4) pixel[3] = 0xFF;
 				} else {
 					pixel[0] = b_bg;
 					pixel[1] = g_bg;
 					pixel[2] = r_bg;
+					if (gfx_bpp == 4) pixel[3] = 0xFF;
 				}
 			}
 		}
@@ -593,7 +599,7 @@ void write_pixel_struct(const pixel_t* pixel)
 uint32_t read_pixel(uint16_t x, uint16_t y)
 {
 	if (x < gfx_width && y < gfx_height) {
-		volatile uint8_t* pixel = gfx_buffer + y * gfx_pitch + x * 3;
+		volatile uint8_t* pixel = gfx_buffer + y * gfx_pitch + x * gfx_bpp;
 		return ((uint32_t)pixel[2] << 16) | ((uint32_t)pixel[1] << 8) | pixel[0];
 	}
 	return 0;
@@ -625,10 +631,11 @@ void write_pixels(const pixel_t* pixels, uint32_t count)
 	
 	for (uint32_t i = 0; i < count; i++) {
 		if (pixels[i].x < gfx_width && pixels[i].y < gfx_height) {
-			volatile uint8_t* pixel = gfx_buffer + pixels[i].y * gfx_pitch + pixels[i].x * 3;
+			volatile uint8_t* pixel = gfx_buffer + pixels[i].y * gfx_pitch + pixels[i].x * gfx_bpp;
 			pixel[0] = pixels[i].b;
 			pixel[1] = pixels[i].g;
 			pixel[2] = pixels[i].r;
+			if (gfx_bpp == 4) pixel[3] = 0xFF;
 		}
 	}
 }
@@ -656,10 +663,11 @@ void write_pixels_rgb(const pixel_rgb_t* pixels)
 	
 	for (uint32_t i = 0; pixels[i].x != 0xFFFF; i++) {
 		if (pixels[i].x < gfx_width && pixels[i].y < gfx_height) {
-			volatile uint8_t* pixel = gfx_buffer + pixels[i].y * gfx_pitch + pixels[i].x * 3;
+			volatile uint8_t* pixel = gfx_buffer + pixels[i].y * gfx_pitch + pixels[i].x * gfx_bpp;
 			pixel[0] = pixels[i].color & 0xFF;
 			pixel[1] = (pixels[i].color >> 8) & 0xFF;
 			pixel[2] = (pixels[i].color >> 16) & 0xFF;
+			if (gfx_bpp == 4) pixel[3] = 0xFF;
 		}
 	}
 }
@@ -683,10 +691,11 @@ void write_pixels_arrays(const uint16_t* x_coords, const uint16_t* y_coords,
 		uint16_t x = x_coords[i];
 		uint16_t y = y_coords[i];
 		if (x < gfx_width && y < gfx_height) {
-			volatile uint8_t* pixel = gfx_buffer + y * gfx_pitch + x * 3;
+			volatile uint8_t* pixel = gfx_buffer + y * gfx_pitch + x * gfx_bpp;
 			pixel[0] = colors[i] & 0xFF;
 			pixel[1] = (colors[i] >> 8) & 0xFF;
 			pixel[2] = (colors[i] >> 16) & 0xFF;
+			if (gfx_bpp == 4) pixel[3] = 0xFF;
 		}
 	}
 }

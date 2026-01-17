@@ -4,8 +4,8 @@
 ; to 64-bit long mode, then loads and jumps to the kernel.
 ;
 ; Memory Layout:
-;   0x7E00 - Stage 2 entry (this code)
-;   0x8000 - E820 memory map
+;   0x7E00 - Stage 2 entry (this code, up to ~0xA600)
+;   0x500  - E820 memory map (safe low memory area)
 ;   0x9000 - Page tables (PML4, PDPT, PD, PT)
 ;   0x100000 - Kernel load address (1MB)
 
@@ -48,40 +48,7 @@ entry:
     jmp dword 0x08:protected_mode_entry
 
 ; ============================================================================
-; Get Memory Map (E820)
-; ============================================================================
-[BITS 16]
-get_memory_map:
-    ; Store E820 map at 0x500 (safe area in low memory, after BDA)
-    mov di, 0x504              ; Start after count field (count at 0x500)
-    xor ebx, ebx                ; Continuation value (start with 0)
-    xor si, si                  ; Entry counter
-    mov edx, 0x534D4150         ; "SMAP" signature
-
-.e820_loop:
-    mov eax, 0xE820
-    mov ecx, 24                 ; Entry size
-    int 0x15
-    jc .e820_done               ; Carry set = error or done
-    
-    cmp eax, 0x534D4150         ; Check SMAP signature
-    jne .e820_done
-
-    inc si                      ; Increment entry count
-    add di, 24                  ; Move to next entry
-
-    test ebx, ebx               ; ebx = 0 means done
-    jz .e820_done
-    jmp .e820_loop
-
-.e820_done:
-    mov [0x500], si             ; Store entry count at 0x500
-    mov word [memory_map_addr], 0x500
-    mov [memory_map_entries], si
-    ret
-
-; ============================================================================
-; Setup VESA VBE Graphics Mode
+; Setup VESA VBE Graphics Mode (Auto-detect max resolution)
 ; ============================================================================
 [BITS 16]
 setup_vesa:
@@ -92,26 +59,112 @@ setup_vesa:
     cmp ax, 0x004F
     jne .vesa_fail
 
-    ; Try to set 1024x768x32 mode (commonly mode 0x118)
-    ; First, try getting mode info for 0x118
+    ; Initialize best mode tracking
+    mov word [best_mode], 0
+    mov dword [best_pixels], 0
+    mov byte [best_bpp], 0
+
+    ; Get pointer to mode list (far pointer at offset 14)
+    mov si, [vbe_info_block + 14]   ; Offset of mode list
+    mov ax, [vbe_info_block + 16]   ; Segment of mode list
+    mov fs, ax                       ; Use FS for mode list segment
+
+.scan_modes:
+    ; Read mode number from list
+    mov cx, [fs:si]
+    cmp cx, 0xFFFF                  ; End of list?
+    je .set_best_mode
+    
+    ; Save mode number and pointer BEFORE BIOS call (BIOS can clobber CX)
+    mov [current_mode], cx
+    add si, 2                       ; Next mode in list
+    push si                         ; Save mode list pointer
+    push fs                         ; Save mode list segment
+
+    ; Get mode info - BIOS may clobber CX, SI, etc.
     mov ax, 0x4F01
-    mov cx, 0x118               ; Mode 0x118 = 1024x768x32
+    mov cx, [current_mode]          ; Mode number for query
+    mov di, mode_info_block
+    int 0x10
+    
+    pop fs                          ; Restore mode list segment
+    pop si                          ; Restore mode list pointer
+    
+    cmp ax, 0x004F
+    jne .scan_modes                 ; Skip if failed
+
+    ; Check mode attributes
+    mov ax, [mode_info_block]       ; Mode attributes
+    test ax, 0x01                   ; Bit 0 = mode supported
+    jz .scan_modes
+    test ax, 0x08                   ; Bit 3 = color mode
+    jz .scan_modes
+    test ax, 0x80                   ; Bit 7 = LFB available
+    jz .scan_modes
+
+    ; Check bits per pixel (we want 32-bit or 24-bit)
+    mov al, [mode_info_block + 25]  ; BitsPerPixel
+    cmp al, 32
+    je .check_resolution
+    cmp al, 24
+    je .check_resolution
+    jmp .scan_modes
+
+.check_resolution:
+    ; Calculate total pixels (width * height) using 16-bit math
+    ; to avoid potential issues with 32-bit ops in real mode
+    mov ax, [mode_info_block + 18]  ; XResolution
+    mov bx, [mode_info_block + 20]  ; YResolution
+    
+    ; Use 32-bit multiply: eax = ax * bx
+    movzx eax, ax
+    movzx ebx, bx
+    imul eax, ebx                   ; eax = total pixels
+
+    ; Compare with best so far
+    cmp eax, [best_pixels]
+    jb .scan_modes                  ; Less pixels, skip
+    je .check_bpp                   ; Same pixels, check BPP
+
+    ; More pixels - this is the new best
+    jmp .new_best
+
+.check_bpp:
+    ; Same pixel count - prefer higher BPP
+    mov dl, [mode_info_block + 25]  ; Current BPP
+    cmp dl, [best_bpp]
+    jbe .scan_modes                 ; Same or worse BPP, skip
+
+.new_best:
+    ; Save this as best mode
+    mov [best_pixels], eax
+    mov cx, [current_mode]          ; Get saved mode number
+    mov [best_mode], cx
+    mov dl, [mode_info_block + 25]  ; BPP
+    mov [best_bpp], dl
+    jmp .scan_modes
+
+.set_best_mode:
+    ; Check if we found any mode
+    mov cx, [best_mode]
+    test cx, cx
+    jz .vesa_fail
+
+    ; Get mode info for best mode (to populate mode_info_block correctly)
+    mov ax, 0x4F01
+    ; CX already contains best_mode
     mov di, mode_info_block
     int 0x10
     cmp ax, 0x004F
-    jne .try_fallback
+    jne .vesa_fail
 
-    ; Check if mode supports LFB
-    mov ax, [mode_info_block]   ; Mode attributes
-    test ax, 0x80               ; Bit 7 = LFB available
-    jz .try_fallback
-
-    ; Set VBE mode 0x118 with LFB
+    ; Set the mode with LFB enabled
     mov ax, 0x4F02
-    mov bx, 0x4118              ; 0x4000 | mode = enable LFB
+    mov bx, [best_mode]
+    or bx, 0x4000                   ; Enable LFB
     int 0x10
     cmp ax, 0x004F
-    jne .try_fallback
+    jne .vesa_fail
 
     ; Store framebuffer info
     mov eax, [mode_info_block + 40]  ; PhysBasePtr
@@ -124,43 +177,54 @@ setup_vesa:
     mov [vbe_height], ax
     mov al, [mode_info_block + 25]   ; BitsPerPixel
     mov [vbe_bpp], al
-    ret
 
-.try_fallback:
-    ; Fallback to mode 0x112 (640x480x32)
-    mov ax, 0x4F01
-    mov cx, 0x112
-    mov di, mode_info_block
-    int 0x10
-    cmp ax, 0x004F
-    jne .vesa_fail
-
-    mov ax, 0x4F02
-    mov bx, 0x4112              ; 0x4000 | mode = enable LFB
-    int 0x10
-    cmp ax, 0x004F
-    jne .vesa_fail
-
-    ; Store framebuffer info
-    mov eax, [mode_info_block + 40]
-    mov [vbe_framebuffer_addr], eax
-    mov ax, [mode_info_block + 16]
-    mov [vbe_pitch], ax
-    mov ax, [mode_info_block + 18]
-    mov [vbe_width], ax
-    mov ax, [mode_info_block + 20]
-    mov [vbe_height], ax
-    mov al, [mode_info_block + 25]
-    mov [vbe_bpp], al
+    ; Restore FS
+    xor ax, ax
+    mov fs, ax
     ret
 
 .vesa_fail:
-    ; Set defaults if VESA fails (no framebuffer)
+    ; Restore FS and set defaults
+    xor ax, ax
+    mov fs, ax
     mov dword [vbe_framebuffer_addr], 0
     mov word [vbe_pitch], 0
     mov word [vbe_width], 0
     mov word [vbe_height], 0
     mov byte [vbe_bpp], 0
+    ret
+
+; ============================================================================
+; Get Memory Map via E820
+; ============================================================================
+[BITS 16]
+get_memory_map:
+    mov di, 0x500               ; Memory map destination (safe low memory, after BDA)
+    mov [memory_map_addr], di   ; Store address
+    xor ebx, ebx                ; Continuation value (0 to start)
+    xor bp, bp                  ; Entry counter
+
+.e820_loop:
+    mov eax, 0xE820             ; E820 function
+    mov ecx, 24                 ; Buffer size (24 bytes per entry)
+    mov edx, 0x534D4150         ; 'SMAP' signature
+    int 0x15
+
+    jc .e820_done               ; Carry set = error or done
+    cmp eax, 0x534D4150         ; Check signature
+    jne .e820_done
+
+    ; Valid entry
+    inc bp                      ; Increment counter
+    add di, 24                  ; Next entry position
+
+    test ebx, ebx               ; If ebx = 0, we're done
+    jz .e820_done
+
+    jmp .e820_loop
+
+.e820_done:
+    mov [memory_map_entries], bp
     ret
 
 ; ============================================================================
@@ -340,10 +404,10 @@ long_mode_entry:
     mov gs, ax
     mov ss, ax
 
-    ; Set up 64-bit stack
-    mov rsp, 0x90000
+    ; Set up 64-bit stack (use higher address to avoid conflicts)
+    mov rsp, 0x9F000
 
-    ; Call kernel loader
+    ; Call kernel loader (this should not return)
     call load_kernel
 
     ; Should not return, but halt if it does
@@ -357,47 +421,59 @@ long_mode_entry:
 ; ============================================================================
 [BITS 64]
 load_kernel:
-    ; Set up stack for C code
+    ; Set up stack for C code (16-byte aligned)
+    ; Use a safe location that won't conflict with anything
     mov rsp, 0x900000
+    and rsp, ~0xF                       ; Ensure 16-byte alignment
     
-    ; Prepare VBE info structure on stack (16 bytes aligned)
-    sub rsp, 16
+    ; Reserve space for structures (64 bytes for alignment + red zone safety)
+    sub rsp, 64
+    
+    ; VBE info at rsp+0 (16 bytes)
     mov rdi, rsp                        ; First argument: pointer to vbe_info_t
     
     ; Fill VBE structure
     mov eax, [rel vbe_framebuffer_addr]
     mov [rdi], eax                      ; framebuffer_addr (4 bytes)
-    mov ax, [rel vbe_pitch]
+    movzx eax, word [rel vbe_pitch]
     mov [rdi + 4], ax                   ; pitch (2 bytes)
-    mov ax, [rel vbe_width]
+    movzx eax, word [rel vbe_width]
     mov [rdi + 6], ax                   ; width (2 bytes)
-    mov ax, [rel vbe_height]
+    movzx eax, word [rel vbe_height]
     mov [rdi + 8], ax                   ; height (2 bytes)
-    mov al, [rel vbe_bpp]
+    movzx eax, byte [rel vbe_bpp]
     mov [rdi + 10], al                  ; bpp (1 byte)
+    mov byte [rdi + 11], 0              ; padding
     
-    ; Prepare memory info structure on stack (8 bytes aligned)
-    sub rsp, 16
-    mov rsi, rsp                        ; Second argument: pointer to memory_info_t
+    ; Memory info at rsp+16 (16 bytes)
+    lea rsi, [rsp + 16]                 ; Second argument: pointer to memory_info_t
     
     ; Fill memory info structure
     mov eax, [rel memory_map_addr]
     mov [rsi], eax                      ; memory_map_addr (4 bytes)
-    mov ax, [rel memory_map_entries]
+    movzx eax, word [rel memory_map_entries]
     mov [rsi + 4], ax                   ; memory_map_entries (2 bytes)
+    mov word [rsi + 6], 0               ; padding
+    
+    ; Ensure stack is 16-byte aligned before call (sub 8 for alignment since call pushes 8)
+    sub rsp, 8
     
     ; Call C kernel loader
     call load_kernel_c
+    
+    ; Restore stack alignment
+    add rsp, 8
     
     ; Check if kernel loading succeeded
     test rax, rax
     jz .load_failed
     
-    ; Save kernel entry point
+    ; Save kernel entry point in a callee-saved register
     mov rbx, rax
     
-    ; Restore stack
+    ; Set up fresh stack for kernel (16-byte aligned)
     mov rsp, 0x900000
+    and rsp, ~0xF
     
     ; Pass boot info to kernel via registers (System V AMD64 ABI):
     ; rdi = framebuffer address (32-bit, zero-extended)
@@ -406,6 +482,7 @@ load_kernel:
     ; rcx = height
     ; r8  = bpp
     ; r9  = memory map address
+    ; stack[0] = memory map entry count
     mov edi, [rel vbe_framebuffer_addr]
     movzx rsi, word [rel vbe_pitch]
     movzx rdx, word [rel vbe_width]
@@ -413,11 +490,28 @@ load_kernel:
     movzx r8, byte [rel vbe_bpp]
     mov r9d, [rel memory_map_addr]
     
-    ; Jump to kernel entry point
-    jmp rbx
+    ; Push memory map entry count as 7th argument (on stack)
+    ; Stack is 16-byte aligned, push adds 8 bytes, so we need another 8 for alignment
+    movzx rax, word [rel memory_map_entries]
+    push rax                            ; 7th argument
+    sub rsp, 8                          ; Align to 16 bytes before call
+    
+    ; Jump to kernel entry point (kernel should never return)
+    call rbx
+    
+    ; If kernel returns, fall through to halt
+    
+.kernel_returned:
+    cli
+    hlt
+    jmp .kernel_returned
 
 .load_failed:
-    ret
+    ; Kernel load failed - halt the system (don't try to return)
+    cli
+.halt_failed:
+    hlt
+    jmp .halt_failed
 
 ; ============================================================================
 ; Data Section
@@ -441,6 +535,13 @@ vbe_bpp:                db 0
                         db 0    ; Padding
 memory_map_addr:        dd 0
 memory_map_entries:     dw 0
+
+; VESA mode selection variables
+best_mode:              dw 0
+best_pixels:            dd 0
+best_bpp:               db 0
+                        db 0    ; Padding
+current_mode:           dw 0    ; Temp storage for current mode during scan
 
 ; ============================================================================
 ; GDT for Protected Mode (32-bit)
@@ -501,9 +602,10 @@ gdt64_descriptor:
     dq gdt64_start
 
 ; ============================================================================
-; VBE Info Buffers (in BSS or zeroed data)
+; VBE Info Buffers (in data section for real mode access)
 ; ============================================================================
-[SECTION .bss]
+[SECTION .data]
 
-vbe_info_block:     resb 512
-mode_info_block:    resb 256
+align 16
+vbe_info_block:     times 512 db 0
+mode_info_block:    times 256 db 0
