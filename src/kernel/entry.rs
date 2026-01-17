@@ -89,7 +89,9 @@ pub extern "C" fn enter(
             core::arch::asm!("sti");  // Enable interrupts
         }
         video::print("Interrupts enabled\n\0");
-        
+
+        video::print("\n\0");
+        video::print("GDT Info:\n\0");
 
         // Print GDT info
         video::print("  Kernel Code Selector: 0x\0");

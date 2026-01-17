@@ -6,7 +6,7 @@ BUILD_DIR = build
 
 .PHONY: all bootloader kernel disk_image run clean
 
-all: bootloader kernel disk_image
+all: clean bootloader kernel disk_image
 
 # Build bootloader (Stage 1 + Stage 2)
 bootloader:

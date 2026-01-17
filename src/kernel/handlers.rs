@@ -13,4 +13,3 @@ fn panic(_info: &PanicInfo) -> ! {
         }
     }
 }
-
