@@ -29,11 +29,13 @@ SECTIONS
         *(.data.*)
     }
     
-    /* Uninitialized data */
+    /* Uninitialized data - must be zeroed at startup */
     .bss : {
+        __bss_start = .;
         *(.bss)
         *(.bss.*)
         *(COMMON)
+        __bss_end = .;
     }
     
     /* Discard debugging info */

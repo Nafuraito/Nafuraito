@@ -7,22 +7,12 @@
 //! - User data segment (Ring 3)
 //! - Task State Segment (TSS)
 
-#![crate_type = "staticlib"]
+#![crate_type = "rlib"]
 #![crate_name = "gdt"]
 #![no_std]
-#![no_main]
 #![allow(unused)]
 
 use core::mem::size_of;
-use core::panic::PanicInfo;
-
-/// Panic handler - halts the CPU
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {
-        unsafe { core::arch::asm!("cli; hlt"); }
-    }
-}
 
 // =============================================================================
 // TSS Module (inline to avoid path issues)
@@ -160,19 +150,26 @@ impl GdtEntry {
     }
 
     pub const fn kernel_code_segment() -> Self {
-        GdtEntry::new(0, 0xFFFFF, 0x9A, 0x0A)
+        // 64-bit code segment: access=0x9A, flags=0x02 (L=1, D/B=0, G=0)
+        // Match bootloader's 64-bit code segment exactly
+        // The bootloader uses: db 0x20 which is flags=0x02 when shifted
+        GdtEntry::new(0, 0, 0x9A, 0x02)
     }
 
     pub const fn kernel_data_segment() -> Self {
-        GdtEntry::new(0, 0xFFFFF, 0x92, 0x0C)
+        // 64-bit data segment: access=0x92, flags=0x00 (G=0, D/B=0, L=0)
+        // Match bootloader's 64-bit data segment exactly
+        GdtEntry::new(0, 0, 0x92, 0x00)
     }
 
     pub const fn user_code_segment() -> Self {
-        GdtEntry::new(0, 0xFFFFF, 0xFA, 0x0A)
+        // 64-bit user code segment: access=0xFA (DPL=3), flags=0x02 (L=1)
+        GdtEntry::new(0, 0, 0xFA, 0x02)
     }
 
     pub const fn user_data_segment() -> Self {
-        GdtEntry::new(0, 0xFFFFF, 0xF2, 0x0C)
+        // 64-bit user data segment: access=0xF2 (DPL=3), flags=0x00
+        GdtEntry::new(0, 0, 0xF2, 0x00)
     }
 }
 
@@ -292,19 +289,26 @@ extern "C" {
 /// Initialize the GDT with TSS
 #[no_mangle]
 #[allow(static_mut_refs)]
-pub unsafe fn init() {
-    TSS.rsp0 = 0x900000;
-    TSS.ist1 = 0x8F0000;
-    TSS.ist2 = 0x8E0000;
-    TSS.ist3 = 0x8D0000;
+pub unsafe fn gdt_init() {
+    // Set up TSS stack pointers
+    TSS.rsp0 = 0x900000;          // Kernel stack for ring 0
+    TSS.ist1 = 0x8F0000;          // IST1 for double fault handler
+    TSS.ist2 = 0x8E0000;          // IST2 for NMI handler
+    TSS.ist3 = 0x8D0000;          // IST3 for machine check
     TSS.iopb_offset = size_of::<TaskStateSegment>() as u16;
 
+    // Set up TSS descriptor in GDT
     let tss_addr = &raw const TSS as u64;
     GDT.set_tss(tss_addr);
     GDT_POINTER = GDT.pointer();
 
+    // Load the new GDT
     gdt_load(&raw const GDT_POINTER);
+    
+    // Reload segment registers (currently a no-op since bootloader segments are compatible)
     reload_segments();
+    
+    // Load the TSS
     tss_load(TSS_SELECTOR);
 }
 

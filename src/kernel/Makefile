@@ -3,7 +3,8 @@
 
 RUSTC = rustc --emit obj -C panic=abort --target x86_64-unknown-linux-gnu \
         -C code-model=kernel -C relocation-model=static \
-        -C opt-level=2 -C overflow-checks=no -C debug-assertions=no 
+        -C opt-level=2 -C overflow-checks=no -C debug-assertions=no \
+        -C target-feature=-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-avx,-avx2 
 
 ASM = nasm
 LD = ld
@@ -18,14 +19,15 @@ GDT_DIR = gdt
 IDT_DIR = idt
 MEMORY_DIR = memory
 
-# Libraries
+# Libraries (static archives)
 LIBVIDEO = $(BUILD_DIR)/drivers/video/libvideo.a
 LIBPIC = $(BUILD_DIR)/drivers/pic/libpic.a
+LIBPCI = $(BUILD_DIR)/drivers/pci/libpci.a
 LIBGDT = $(BUILD_DIR)/gdt/libgdt.a
 LIBIDT = $(BUILD_DIR)/idt/libidt.a
 LIBMEMORY = $(BUILD_DIR)/memory/libmemory.a
 
-ALL_LIBS = $(LIBVIDEO) $(LIBGDT) $(LIBIDT)
+ALL_LIBS = $(LIBVIDEO) $(LIBPIC) $(LIBPCI) $(LIBGDT) $(LIBIDT) $(LIBMEMORY)
 
 .PHONY: all clean libs drivers gdt idt memory compile
 
@@ -55,8 +57,11 @@ compile: libs
 		$(BUILD_DIR)/entry.o \
 		$(BUILD_DIR)/main.o \
 		$(BUILD_DIR)/drivers/video/vga.o \
-		$(BUILD_DIR)/gdt/gdt.o \
-		$(BUILD_DIR)/idt/idt.o \
+		$(LIBGDT) \
+		$(LIBIDT) \
+		$(LIBPIC) \
+		$(LIBPCI) \
+		$(LIBMEMORY) \
 		-o $(ROOT_BUILD_DIR)/kernel.bin
 
 clean:

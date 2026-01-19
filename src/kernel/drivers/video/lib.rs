@@ -2,21 +2,10 @@
 //!
 //! This library provides VGA graphics functionality for the kernel.
 
-#![crate_type = "staticlib"]
+#![crate_type = "rlib"]
 #![crate_name = "video"]
 #![no_std]
-#![no_main]
 #![allow(unused)]
-
-use core::panic::PanicInfo;
-
-/// Panic handler - halts the CPU
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {
-        unsafe { core::arch::asm!("cli; hlt"); }
-    }
-}
 
 // =========================================================================
 // Pixel Structures

@@ -55,21 +55,9 @@ tss_load:
 ; =============================================================================
 global reload_segments
 reload_segments:
-    ; Reload CS by doing a far return
-    ; Push the new CS and the return address
-    push 0x08               ; Kernel code segment selector
-    lea rax, [rel .reload_cs]
-    push rax
-    retfq                   ; Far return to reload CS
-
-.reload_cs:
-    ; Reload data segment registers
-    mov ax, 0x10            ; Kernel data segment selector
-    mov ds, ax
-    mov es, ax
-    mov fs, ax
-    mov gs, ax
-    mov ss, ax
+    ; In 64-bit long mode, data segment registers are not checked in the same
+    ; way as in protected mode. The bootloader has already set them up.
+    ; Skip segment reloading since the descriptors are compatible.
     ret
 
 ; =============================================================================

@@ -62,30 +62,30 @@
 - [X] APIC detection and initialization
 - [X] Local APIC setup
 - [X] I/O APIC setup
-- [ ] MSI/MSI-X support for modern devices
+- [X] MSI/MSI-X support for modern devices
 
 ---
 
 ## PHASE 2: MEMORY MANAGEMENT
 
 ### Physical Memory Manager (PMM)
-- [ ] Parse memory map from bootloader
+- [X] Parse memory map from bootloader
 - [ ] Bitmap allocator implementation
 - [ ] Free list allocator (alternative)
 - [ ] Buddy allocator (alternative)
 - [ ] Page frame allocation (`alloc_frame`)
 - [ ] Page frame deallocation (`free_frame`)
-- [ ] Memory statistics tracking
+- [X] Memory statistics tracking
 - [ ] DMA-capable memory zones
 - [ ] NUMA awareness (multi-socket systems)
 
 ### Virtual Memory Manager (VMM)
 - [X] 4-level paging (PML4 → PDPT → PD → PT)
 - [ ] 5-level paging support (LA57) for large memory
-- [ ] Page table creation/destruction
+- [X] Page table creation/destruction
 - [ ] Virtual address mapping (`map_page`)
 - [ ] Virtual address unmapping (`unmap_page`)
-- [ ] Permission bits (R/W/X, User/Supervisor)
+- [X] Permission bits (R/W/X, User/Supervisor)
 - [ ] Page attribute table (PAT) support
 - [ ] Copy-on-Write (CoW) implementation
 - [ ] Demand paging
@@ -337,10 +337,10 @@
 - [ ] Hardware cursor
 
 ### VGA Graphics
-- [ ] VGA mode setting
-- [ ] VGA register programming
-- [ ] Planar memory access
-- [ ] Standard VGA modes (320x200, 640x480)
+- [X] VGA mode setting
+- [X] VGA register programming
+- [X] Planar memory access
+- [X] Standard VGA modes (320x200, 640x480)
 
 ### VESA/VBE
 - [X] VBE mode enumeration
@@ -357,7 +357,7 @@
 - [X] Pixel plotting
 - [X] Line drawing
 - [X] Rectangle drawing
-- [ ] Bitmap blitting
+- [X] Bitmap blitting
 - [ ] Hardware scrolling
 - [ ] Double buffering
 - [ ] VSync support
@@ -383,7 +383,7 @@
 ### ATA/IDE
 - [X] PIO mode read/write
 - [ ] DMA mode read/write
-- [ ] Drive detection
+- [X] Drive detection
 - [ ] IDENTIFY command
 - [X] LBA28 addressing
 - [ ] LBA48 addressing
@@ -610,12 +610,12 @@
 ## DRIVERS: BUSES & SYSTEM
 
 ### PCI/PCIe
-- [ ] PCI configuration space access
-- [ ] PCI device enumeration
-- [ ] PCI BAR (Base Address Register) handling
-- [ ] PCI interrupt routing
-- [ ] PCIe extended configuration
-- [ ] MSI/MSI-X setup
+- [X] PCI configuration space access
+- [X] PCI device enumeration
+- [X] PCI BAR (Base Address Register) handling
+- [X] PCI interrupt routing
+- [X] PCIe extended configuration
+- [X] MSI/MSI-X setup
 
 ### ACPI
 - [ ] RSDP (Root System Description Pointer)
@@ -954,10 +954,10 @@
 ## MILESTONES
 
 1.  **Boot**: ~~Bootloader loads kernel, prints "Hello World"~~ ✅
-2.  **Interrupts**: GDT, IDT, PIC working, timer interrupt firing
+2.  **Interrupts**: ~~GDT, IDT, PIC working, timer interrupt firing~~ ✅
 3.  **Memory**: Physical and virtual memory management complete
-4.  **Storage**: Can read/write to disk (ATA/AHCI)
-5.  **File System**: VFS layer with ext2/FAT support
+4.  **Storage**: ~~Can read/write to disk (ATA/AHCI)~~ ✅ (ATA PIO)
+5.  **File System**: VFS layer with ext2/FAT support - **Partial** (ext4 implemented)
 6.  **Processes**: Process creation, scheduling, context switching
 7.  **User Space**: User mode, system calls, ELF loading
 8.  **Shell**: Working command-line shell

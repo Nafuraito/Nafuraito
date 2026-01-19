@@ -6,21 +6,10 @@
 //! - Virtual memory management (planned)
 //! - Heap allocation (planned)
 
-#![crate_type = "staticlib"]
+#![crate_type = "rlib"]
 #![crate_name = "memory"]
 #![no_std]
-#![no_main]
 #![allow(unused)]
-
-use core::panic::PanicInfo;
-
-/// Panic handler - halts the CPU
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {
-        unsafe { core::arch::asm!("cli; hlt"); }
-    }
-}
 
 // =============================================================================
 // Constants
@@ -124,12 +113,42 @@ pub struct MemoryMap {
 }
 
 impl MemoryMap {
+    /// Parse memory map from bootloader format
+    /// The bootloader passes entries directly at memory_map_addr (24 bytes per entry)
+    /// We scan entries until we find an invalid one.
     pub unsafe fn parse(memory_map_addr: u64) -> Self {
-        let addr = memory_map_addr as usize;
-        let count_ptr = addr as *const u16;
-        let count = core::ptr::read_unaligned(count_ptr) as usize;
-        let entries_ptr = addr.wrapping_add(4) as *const E820Entry;
-        let safe_count = if count > MAX_MEMORY_ENTRIES { MAX_MEMORY_ENTRIES } else { count };
+        let entries_ptr = memory_map_addr as *const E820Entry;
+        
+        // Scan for valid entries - stop at invalid entry or max count
+        let mut count = 0usize;
+        
+        while count < MAX_MEMORY_ENTRIES {
+            let entry_ptr = entries_ptr.wrapping_add(count);
+            let entry = core::ptr::read_unaligned(entry_ptr);
+            
+            let region_type = entry.region_type;
+            let length = entry.length;
+            
+            // Valid E820 types are 1-5
+            if region_type < 1 || region_type > 5 {
+                break;
+            }
+            if length == 0 {
+                break;
+            }
+            count += 1;
+        }
+        
+        MemoryMap {
+            entries_ptr,
+            count,
+        }
+    }
+    
+    /// Parse memory map with explicit count (for when count is known)
+    pub unsafe fn parse_with_count(memory_map_addr: u64, entry_count: usize) -> Self {
+        let entries_ptr = memory_map_addr as *const E820Entry;
+        let safe_count = if entry_count > MAX_MEMORY_ENTRIES { MAX_MEMORY_ENTRIES } else { entry_count };
         
         MemoryMap {
             entries_ptr,
@@ -294,6 +313,28 @@ pub fn memory_get() -> Option<&'static MemoryMap> {
         } else {
             None
         }
+    }
+}
+
+/// Get total usable memory in bytes
+#[no_mangle]
+#[allow(static_mut_refs)]
+pub unsafe extern "C" fn memory_get_total_usable() -> u64 {
+    if MEMORY_MAP_STORAGE.initialized {
+        MEMORY_MAP_STORAGE.map.total_usable_memory()
+    } else {
+        0
+    }
+}
+
+/// Get highest usable memory address
+#[no_mangle]
+#[allow(static_mut_refs)]
+pub unsafe extern "C" fn memory_get_highest_address() -> u64 {
+    if MEMORY_MAP_STORAGE.initialized {
+        MEMORY_MAP_STORAGE.map.highest_usable_address()
+    } else {
+        0
     }
 }
 

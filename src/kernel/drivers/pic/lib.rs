@@ -3,21 +3,10 @@
 //! PIC (Programmable Interrupt Controller) and APIC driver for Nafuraito.
 //! Provides support for both legacy 8259 PIC and modern APIC interrupt controllers.
 
-#![crate_type = "staticlib"]
+#![crate_type = "rlib"]
 #![crate_name = "pic"]
 #![no_std]
-#![no_main]
 #![allow(unused)]
-
-use core::panic::PanicInfo;
-
-/// Panic handler - halts the CPU
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {
-        unsafe { core::arch::asm!("cli; hlt"); }
-    }
-}
 
 // ============================================================================
 // LEGACY 8259 PIC
@@ -123,6 +112,23 @@ unsafe fn io_wait() {
     outb(0x80, 0);
 }
 
+// Public wrappers for external use
+#[no_mangle]
+pub unsafe extern "C" fn pic_outb(port: u16, val: u8) {
+    outb(port, val);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pic_inb(port: u16) -> u8 {
+    inb(port)
+}
+
+/// Initialize the PIC with standard remapping (IRQs 0-15 -> vectors 32-47)
+#[no_mangle]
+pub unsafe extern "C" fn pic_init() {
+    remap(0x20, 0x28);
+}
+
 #[inline]
 unsafe fn rdmsr(msr: u32) -> u64 {
     let low: u32;
@@ -185,21 +191,21 @@ unsafe fn cpuid(leaf: u32) -> (u32, u32, u32, u32) {
 
 /// Check if APIC is supported via CPUID
 #[no_mangle]
-pub unsafe fn has_apic() -> bool {
+pub unsafe extern "C" fn has_apic() -> bool {
     let (_, _, _, edx) = cpuid(1);
     (edx & (1 << 9)) != 0  // Bit 9 in EDX indicates APIC support
 }
 
 /// Check if x2APIC is supported via CPUID
 #[no_mangle]
-pub unsafe fn has_x2apic() -> bool {
+pub unsafe extern "C" fn has_x2apic() -> bool {
     let (_, _, ecx, _) = cpuid(1);
     (ecx & (1 << 21)) != 0  // Bit 21 in ECX indicates x2APIC support
 }
 
 /// Remap PIC interrupt vectors
 #[no_mangle]
-pub unsafe fn remap(offset1: u8, offset2: u8) {
+pub unsafe extern "C" fn remap(offset1: u8, offset2: u8) {
     // Typically called as: remap(0x20, 0x28)
     // offset1: 0x20 (32) - Master PIC IRQs 0-7 -> interrupts 32-39
     // offset2: 0x28 (40) - Slave PIC IRQs 8-15 -> interrupts 40-47
@@ -225,7 +231,7 @@ pub unsafe fn remap(offset1: u8, offset2: u8) {
 
 /// Send End of Interrupt to PIC
 #[no_mangle]
-pub unsafe fn send_eoi(irq: u8) {
+pub unsafe extern "C" fn send_eoi(irq: u8) {
     if irq >= 8 {
         outb(PIC2_COMMAND, PIC_EOI);
     }
@@ -234,14 +240,14 @@ pub unsafe fn send_eoi(irq: u8) {
 
 /// Disable the PIC
 #[no_mangle]
-pub unsafe fn disable() {
+pub unsafe extern "C" fn disable() {
     outb(PIC1_DATA, 0xff);
     outb(PIC2_DATA, 0xff);
 }
 
 /// Set (mask) an IRQ line
 #[no_mangle]
-pub unsafe fn set_mask(irq_line: u8) {
+pub unsafe extern "C" fn set_mask(irq_line: u8) {
     let port = if irq_line < 8 {
         PIC1_DATA
     } else {
@@ -254,7 +260,7 @@ pub unsafe fn set_mask(irq_line: u8) {
 
 /// Clear (unmask) an IRQ line
 #[no_mangle]
-pub unsafe fn clear_mask(irq_line: u8) {
+pub unsafe extern "C" fn clear_mask(irq_line: u8) {
     let port = if irq_line < 8 {
         PIC1_DATA
     } else {
@@ -271,14 +277,14 @@ pub unsafe fn clear_mask(irq_line: u8) {
 
 /// Get the physical address of the Local APIC
 #[no_mangle]
-pub unsafe fn get_local_apic_base() -> u64 {
+pub unsafe extern "C" fn get_local_apic_base() -> u64 {
     let apic_base_msr = rdmsr(IA32_APIC_BASE_MSR);
     apic_base_msr & 0xFFFF_FFFF_FFFF_F000  // Mask out lower 12 bits
 }
 
 /// Enable the Local APIC
 #[no_mangle]
-pub unsafe fn enable_local_apic() {
+pub unsafe extern "C" fn enable_local_apic() {
     // Enable APIC via MSR
     let apic_base_msr = rdmsr(IA32_APIC_BASE_MSR);
     wrmsr(IA32_APIC_BASE_MSR, apic_base_msr | IA32_APIC_BASE_ENABLE);
@@ -295,7 +301,7 @@ pub unsafe fn enable_local_apic() {
 
 /// Disable the Local APIC
 #[no_mangle]
-pub unsafe fn disable_local_apic() {
+pub unsafe extern "C" fn disable_local_apic() {
     let apic_base = get_local_apic_base();
     let spurious_reg = apic_base + APIC_SPURIOUS as u64;
     let spurious_value = read_volatile_u32(spurious_reg);
@@ -304,7 +310,7 @@ pub unsafe fn disable_local_apic() {
 
 /// Send End of Interrupt to Local APIC
 #[no_mangle]
-pub unsafe fn local_apic_eoi() {
+pub unsafe extern "C" fn local_apic_eoi() {
     let apic_base = get_local_apic_base();
     let eoi_reg = apic_base + APIC_EOI as u64;
     write_volatile_u32(eoi_reg, 0);  // Writing any value signals EOI
@@ -312,27 +318,27 @@ pub unsafe fn local_apic_eoi() {
 
 /// Read Local APIC register
 #[no_mangle]
-pub unsafe fn local_apic_read(offset: u32) -> u32 {
+pub unsafe extern "C" fn local_apic_read(offset: u32) -> u32 {
     let apic_base = get_local_apic_base();
     read_volatile_u32(apic_base + offset as u64)
 }
 
 /// Write Local APIC register
 #[no_mangle]
-pub unsafe fn local_apic_write(offset: u32, value: u32) {
+pub unsafe extern "C" fn local_apic_write(offset: u32, value: u32) {
     let apic_base = get_local_apic_base();
     write_volatile_u32(apic_base + offset as u64, value);
 }
 
 /// Get Local APIC ID
 #[no_mangle]
-pub unsafe fn get_local_apic_id() -> u32 {
+pub unsafe extern "C" fn get_local_apic_id() -> u32 {
     (local_apic_read(APIC_ID) >> 24) & 0xFF
 }
 
 /// Initialize Local APIC timer in periodic mode
 #[no_mangle]
-pub unsafe fn local_apic_timer_init(vector: u8, divider: u32, initial_count: u32) {
+pub unsafe extern "C" fn local_apic_timer_init(vector: u8, divider: u32, initial_count: u32) {
     // Set timer divide configuration
     let divide_value = match divider {
         1 => 0b1011,
@@ -356,7 +362,7 @@ pub unsafe fn local_apic_timer_init(vector: u8, divider: u32, initial_count: u32
 
 /// Stop Local APIC timer
 #[no_mangle]
-pub unsafe fn local_apic_timer_stop() {
+pub unsafe extern "C" fn local_apic_timer_stop() {
     local_apic_write(APIC_TIMER_LVT, APIC_TIMER_MASKED);
     local_apic_write(APIC_TIMER_INITIAL, 0);
 }

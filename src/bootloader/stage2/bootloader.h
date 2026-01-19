@@ -70,7 +70,7 @@ static inline void insw(uint16_t port, void* addr, uint32_t count) {
 
 #define KERNEL_LOAD_ADDR    0x100000
 #define KERNEL_START_SECTOR 64
-#define KERNEL_SECTORS      32
+#define KERNEL_SECTORS      128
 
 // ATA Primary Bus Ports
 #define ATA_PRIMARY_DATA     0x1F0

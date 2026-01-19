@@ -20,7 +20,7 @@ kernel:
 disk_image: bootloader kernel
 	@mkdir -p $(BUILD_DIR)
 	@echo "Creating disk image..."
-	dd if=/dev/zero of=$(BUILD_DIR)/disk.img bs=1024 count=1634 2>/dev/null
+	dd if=/dev/zero of=$(BUILD_DIR)/disk.img bs=1M count=32 2>/dev/null
 	dd if=$(BUILD_DIR)/stage1.bin of=$(BUILD_DIR)/disk.img bs=512 seek=0 conv=notrunc 2>/dev/null
 	dd if=$(BUILD_DIR)/stage2.bin of=$(BUILD_DIR)/disk.img bs=512 seek=1 conv=notrunc 2>/dev/null
 	dd if=$(BUILD_DIR)/kernel.bin of=$(BUILD_DIR)/disk.img bs=512 seek=64 conv=notrunc 2>/dev/null
@@ -29,7 +29,7 @@ disk_image: bootloader kernel
 # Run in QEMU
 run: all
 # run with 1 gig of RAM  
-	qemu-system-x86_64 -m 1024 -drive file=$(BUILD_DIR)/disk.img,format=raw -boot c -enable-kvm -smp 1 -net nic -net user
+	qemu-system-x86_64 -m 512M -drive file=$(BUILD_DIR)/disk.img,format=raw -boot c -enable-kvm -smp 1 -net nic -net user
 
 # Run with debug output
 run-debug: all
