@@ -1,4 +1,4 @@
-# TODOS - Nafuraito KERNEL Development
+# TODO-LIST - Nafuraito Development
 
 ---
 
