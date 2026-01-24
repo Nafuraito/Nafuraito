@@ -68,8 +68,9 @@ static inline void insw(uint16_t port, void* addr, uint32_t count) {
 // ATA PIO Constants
 //=============================================================================
 
-// Kernel load address in memory (1MB mark - safe high memory)
 #define KERNEL_LOAD_ADDR    0x100000
+#define KERNEL_START_SECTOR 64
+#define KERNEL_SECTORS      128
 
 // ATA Primary Bus Ports
 #define ATA_PRIMARY_DATA     0x1F0
@@ -91,11 +92,46 @@ static inline void insw(uint16_t port, void* addr, uint32_t count) {
 // ATA Commands
 #define ATA_CMD_READ_SECTORS 0x20
 
+// Serial port (COM1) for debugging
+#define SERIAL_PORT 0x3F8
+
+//=============================================================================
+// Serial Debug Functions
+//=============================================================================
+
+static inline void serial_char(char c) {
+    outb(SERIAL_PORT, c);
+}
+
+static inline void serial_str(const char* s) {
+    while (*s) {
+        serial_char(*s++);
+    }
+}
+
+static inline void serial_hex8(uint8_t val) {
+    const char hex[] = "0123456789ABCDEF";
+    serial_char(hex[(val >> 4) & 0x0F]);
+    serial_char(hex[val & 0x0F]);
+}
+
+static inline void serial_hex32(uint32_t val) {
+    serial_hex8((val >> 24) & 0xFF);
+    serial_hex8((val >> 16) & 0xFF);
+    serial_hex8((val >> 8) & 0xFF);
+    serial_hex8(val & 0xFF);
+}
+
 //=============================================================================
 // Function Declarations
 //=============================================================================
 
 // Main kernel loader function (called from assembly)
 uint64_t load_kernel_c(vbe_info_t* vbe, memory_info_t* mem);
+
+// ATA driver functions
+int ata_wait_ready(void);
+int ata_wait_drq(void);
+int ata_read_sectors(void* dest, uint64_t lba, uint32_t count);
 
 #endif // BOOTLOADER_H

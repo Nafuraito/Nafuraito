@@ -4,16 +4,6 @@ BOOTLOADER_DIR = src/bootloader
 KERNEL_DIR = src/kernel
 BUILD_DIR = build
 
-# Disk image layout:
-# - Sector 0: Stage 1 bootloader (MBR, 512 bytes)
-# - Sectors 1-20: Stage 2 bootloader (~10KB)
-# - Sectors 64+: EXT4 filesystem with journaling containing /nafuraito/kernel.bin
-
-# EXT4 partition configuration
-EXT4_START_SECTOR = 64
-EXT4_SIZE_MB = 30
-DISK_SIZE_MB = 32
-
 .PHONY: all bootloader kernel disk_image run clean
 
 all: bootloader kernel disk_image
@@ -26,66 +16,53 @@ bootloader:
 kernel:
 	$(MAKE) -C $(KERNEL_DIR)
 
-# Create disk image with bootloader and ext4 filesystem containing kernel
+# Create disk image with bootloader and kernel
 disk_image: bootloader kernel
 	@mkdir -p $(BUILD_DIR)
-	@echo "=========================================="
-	@echo "Creating disk image with ext4 filesystem..."
-	@echo "=========================================="
-	
-	# Step 1: Create empty disk image (32MB)
-	dd if=/dev/zero of=$(BUILD_DIR)/disk.img bs=1M count=$(DISK_SIZE_MB) 2>/dev/null
-	
-	# Step 2: Write Stage 1 bootloader (MBR) at sector 0
-	dd if=$(BUILD_DIR)/stage1.bin of=$(BUILD_DIR)/disk.img bs=512 seek=0 conv=notrunc 2>/dev/null
-	
-	# Step 3: Write Stage 2 bootloader starting at sector 1
+	@echo "Creating bootable disk image with ext4 filesystem..."
+	# Create empty disk image (256MB)
+	dd if=/dev/zero of=$(BUILD_DIR)/disk.img bs=1M count=256 2>/dev/null
+
+	# Create partition table FIRST (before writing bootloader, as parted mklabel overwrites MBR)
+	parted -s $(BUILD_DIR)/disk.img mklabel msdos
+	parted -s $(BUILD_DIR)/disk.img mkpart primary ext4 1MiB 100%
+	parted -s $(BUILD_DIR)/disk.img set 1 boot on
+
+	# Save the partition table (bytes 446-511)
+	dd if=$(BUILD_DIR)/disk.img of=$(BUILD_DIR)/partition_table.tmp bs=1 skip=446 count=66 2>/dev/null
+	# Write stage1 bootloader to first sector (overwrites everything including boot sig)
+	dd if=$(BUILD_DIR)/stage1.bin of=$(BUILD_DIR)/disk.img bs=512 count=1 conv=notrunc 2>/dev/null
+	# Restore the partition table (bytes 446-509, keeping our boot signature at 510-511)
+	dd if=$(BUILD_DIR)/partition_table.tmp of=$(BUILD_DIR)/disk.img bs=1 seek=446 count=64 conv=notrunc 2>/dev/null
+	rm -f $(BUILD_DIR)/partition_table.tmp
+	# Write stage2 bootloader starting at second sector (sector 1, offset 512 bytes)
 	dd if=$(BUILD_DIR)/stage2.bin of=$(BUILD_DIR)/disk.img bs=512 seek=1 conv=notrunc 2>/dev/null
+
+	# Setup loop device for partition
+	$(eval LOOP_DEV := $(shell sudo losetup -f))
+	sudo losetup -P $(LOOP_DEV) $(BUILD_DIR)/disk.img
+
+	# Create ext4 filesystem with journaling
+	sudo mkfs.ext4 -j $(LOOP_DEV)p1
 	
-	# Step 4: Create ext4 filesystem image (separate file first)
-	@echo "Creating ext4 filesystem with journaling..."
-	dd if=/dev/zero of=$(BUILD_DIR)/ext4.img bs=1M count=$(EXT4_SIZE_MB) 2>/dev/null
-	mkfs.ext4 -F -O has_journal -L "NAFURAITO" $(BUILD_DIR)/ext4.img >/dev/null 2>&1
-	
-	# Step 5: Mount ext4 filesystem and copy kernel
-	@echo "Mounting ext4 filesystem and installing kernel..."
-	@mkdir -p $(BUILD_DIR)/mnt
-	sudo mount -o loop $(BUILD_DIR)/ext4.img $(BUILD_DIR)/mnt
-	sudo mkdir -p $(BUILD_DIR)/mnt/nafuraito
-	sudo cp $(BUILD_DIR)/kernel.bin $(BUILD_DIR)/mnt/nafuraito/kernel.bin
-	sudo chmod 644 $(BUILD_DIR)/mnt/nafuraito/kernel.bin
-	@echo "Kernel installed at /nafuraito/kernel.bin"
-	@ls -la $(BUILD_DIR)/mnt/nafuraito/
-	sudo umount $(BUILD_DIR)/mnt
-	@rmdir $(BUILD_DIR)/mnt
-	
-	# Step 6: Write ext4 filesystem to disk image at the partition offset
-	dd if=$(BUILD_DIR)/ext4.img of=$(BUILD_DIR)/disk.img bs=512 seek=$(EXT4_START_SECTOR) conv=notrunc 2>/dev/null
-	
-	# Step 7: Clean up temporary ext4 image
-	rm -f $(BUILD_DIR)/ext4.img
-	
-	@echo "=========================================="
-	@echo "Disk image created: $(BUILD_DIR)/disk.img"
-	@echo "  - Stage 1: sector 0"
-	@echo "  - Stage 2: sectors 1-20"
-	@echo "  - EXT4 partition: sector $(EXT4_START_SECTOR)+"
-	@echo "  - Kernel at: /nafuraito/kernel.bin"
-	@echo "=========================================="
+	# Mount and copy kernel
+	sudo mkdir -p /mnt/nafuraito_build
+	sudo mount $(LOOP_DEV)p1 /mnt/nafuraito_build
+	sudo mkdir -p /mnt/nafuraito_build/nafuraito
+	sudo cp $(BUILD_DIR)/kernel.bin /mnt/nafuraito_build/nafuraito/
+	sudo umount /mnt/nafuraito_build
+	sudo losetup -d $(LOOP_DEV)
+	@echo "Bootable disk image with ext4 created: $(BUILD_DIR)/disk.img"
 
 # Run in QEMU
 run: all
-	# Run with 512MB of RAM
+# run with 1 gig of RAM  
 	qemu-system-x86_64 -m 512M -drive file=$(BUILD_DIR)/disk.img,format=raw -boot c -enable-kvm -smp 1 -net nic -net user
 
 # Run with debug output
 run-debug: all
 	qemu-system-x86_64 -m 1024 -drive file=$(BUILD_DIR)/disk.img,format=raw -boot c \
 		-serial stdio -d int,cpu_reset -no-reboot -no-shutdown
-
-# Run without KVM (for systems without hardware virtualization)
-run-nokvm: all
-	qemu-system-x86_64 -m 512M -drive file=$(BUILD_DIR)/disk.img,format=raw -boot c -smp 1 -net nic -net user
 
 clean:
 	rm -rf $(BUILD_DIR)

@@ -15,6 +15,19 @@
 
 global entry
 entry:
+    ; Serial debug: Stage2 started
+    mov dx, 0x3F8
+    mov al, 'S'
+    out dx, al
+    mov al, '2'
+    out dx, al
+    mov al, ':'
+    out dx, al
+    mov al, 'S'
+    out dx, al
+    mov al, 10
+    out dx, al
+
     ; Set up segments
     xor ax, ax
     mov ds, ax
@@ -38,6 +51,19 @@ entry:
 
     ; Disable interrupts before mode switch
     cli
+
+    ; Serial debug: About to enter protected mode
+    mov dx, 0x3F8
+    mov al, 'S'
+    out dx, al
+    mov al, '2'
+    out dx, al
+    mov al, ':'
+    out dx, al
+    mov al, 'P'
+    out dx, al
+    mov al, 10
+    out dx, al
 
     ; Enable protected mode (set PE bit in CR0)
     mov eax, cr0
@@ -281,6 +307,15 @@ enable_a20:
 [BITS 32]
 
 protected_mode_entry:
+    ; Serial debug: In protected mode
+    mov dx, 0x3F8
+    mov al, 'P'
+    out dx, al
+    mov al, 'M'
+    out dx, al
+    mov al, 10
+    out dx, al
+
     ; Set up segment registers for 32-bit mode
     mov ax, 0x10                ; Data segment selector
     mov ds, ax
@@ -299,7 +334,7 @@ protected_mode_entry:
     mov cr4, eax
 
     ; Load PML4 address into CR3
-    mov eax, 0x9000             ; PML4 table at 0x9000
+    mov eax, 0x10000            ; PML4 table at 0x10000
     mov cr3, eax
 
     ; Enable long mode via EFER MSR
@@ -321,33 +356,34 @@ protected_mode_entry:
 
 ; ============================================================================
 ; Setup Paging (Identity map first 4GB)
+; Page tables located at 0x10000-0x16000 to avoid conflicts with stage2
 ; ============================================================================
 [BITS 32]
 setup_paging:
-    ; Clear page table area (0x9000 - 0xF000)
-    mov edi, 0x9000
+    ; Clear page table area (0x10000 - 0x16000)
+    mov edi, 0x10000
     xor eax, eax
     mov ecx, 0x6000 / 4         ; 24KB / 4 bytes = 6144 dwords
     rep stosd
 
-    ; PML4[0] -> PDPT at 0xA000
-    mov dword [0x9000], 0xA003  ; Present + Writable + PDPT address
+    ; PML4[0] -> PDPT at 0x11000
+    mov dword [0x10000], 0x11003  ; Present + Writable + PDPT address
 
-    ; PDPT[0] -> PD at 0xB000 (first 1GB)
-    mov dword [0xA000], 0xB003  ; Present + Writable + PD address
+    ; PDPT[0] -> PD at 0x12000 (first 1GB)
+    mov dword [0x11000], 0x12003  ; Present + Writable + PD address
 
-    ; PDPT[1] -> PD at 0xC000 (second 1GB)
-    mov dword [0xA008], 0xC003
+    ; PDPT[1] -> PD at 0x13000 (second 1GB)
+    mov dword [0x11008], 0x13003
 
-    ; PDPT[2] -> PD at 0xD000 (third 1GB)
-    mov dword [0xA010], 0xD003
+    ; PDPT[2] -> PD at 0x14000 (third 1GB)
+    mov dword [0x11010], 0x14003
 
-    ; PDPT[3] -> PD at 0xE000 (fourth 1GB)
-    mov dword [0xA018], 0xE003
+    ; PDPT[3] -> PD at 0x15000 (fourth 1GB)
+    mov dword [0x11018], 0x15003
 
     ; Fill Page Directories with 2MB pages (identity mapping)
-    ; PD at 0xB000: maps 0x00000000 - 0x3FFFFFFF
-    mov edi, 0xB000
+    ; PD at 0x12000: maps 0x00000000 - 0x3FFFFFFF
+    mov edi, 0x12000
     mov eax, 0x83               ; Present + Writable + 2MB page
     mov ecx, 512
 .fill_pd1:
@@ -356,8 +392,8 @@ setup_paging:
     add edi, 8
     loop .fill_pd1
 
-    ; PD at 0xC000: maps 0x40000000 - 0x7FFFFFFF
-    mov edi, 0xC000
+    ; PD at 0x13000: maps 0x40000000 - 0x7FFFFFFF
+    mov edi, 0x13000
     mov eax, 0x40000083
     mov ecx, 512
 .fill_pd2:
@@ -366,8 +402,8 @@ setup_paging:
     add edi, 8
     loop .fill_pd2
 
-    ; PD at 0xD000: maps 0x80000000 - 0xBFFFFFFF
-    mov edi, 0xD000
+    ; PD at 0x14000: maps 0x80000000 - 0xBFFFFFFF
+    mov edi, 0x14000
     mov eax, 0x80000083
     mov ecx, 512
 .fill_pd3:
@@ -376,8 +412,8 @@ setup_paging:
     add edi, 8
     loop .fill_pd3
 
-    ; PD at 0xE000: maps 0xC0000000 - 0xFFFFFFFF
-    mov edi, 0xE000
+    ; PD at 0x15000: maps 0xC0000000 - 0xFFFFFFFF
+    mov edi, 0x15000
     mov eax, 0xC0000083
     mov ecx, 512
 .fill_pd4:
@@ -396,6 +432,15 @@ setup_paging:
 extern load_kernel_c
 
 long_mode_entry:
+    ; Serial debug: In long mode
+    mov dx, 0x3F8
+    mov al, 'L'
+    out dx, al
+    mov al, 'M'
+    out dx, al
+    mov al, 10
+    out dx, al
+
     ; Set up 64-bit segment registers
     mov ax, 0x10
     mov ds, ax
@@ -458,6 +503,15 @@ load_kernel:
     ; Ensure stack is 16-byte aligned before call (sub 8 for alignment since call pushes 8)
     sub rsp, 8
     
+    ; Serial debug: About to call C loader
+    mov dx, 0x3F8
+    mov al, 'L'
+    out dx, al
+    mov al, 'D'
+    out dx, al
+    mov al, 10
+    out dx, al
+
     ; Call C kernel loader
     call load_kernel_c
     
@@ -490,6 +544,15 @@ load_kernel:
     movzx r8, byte [rel vbe_bpp]
     mov r9d, [rel memory_map_addr]
     
+    ; Serial debug: About to jump to kernel
+    mov dx, 0x3F8
+    mov al, 'J'
+    out dx, al
+    mov al, 'K'
+    out dx, al
+    mov al, 10
+    out dx, al
+
     ; Push memory map entry count as 7th argument (on stack)
     ; Stack is 16-byte aligned, push adds 8 bytes, so we need another 8 for alignment
     movzx rax, word [rel memory_map_entries]
@@ -599,7 +662,8 @@ gdt64_end:
 
 gdt64_descriptor:
     dw gdt64_end - gdt64_start - 1
-    dq gdt64_start
+    dd gdt64_start              ; Use 32-bit base (loaded from 32-bit mode)
+    dd 0                        ; Upper 32 bits (for 64-bit reload later if needed)
 
 ; ============================================================================
 ; VBE Info Buffers (in data section for real mode access)

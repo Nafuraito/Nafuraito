@@ -174,12 +174,21 @@ fn print_hex_u64(num: u64) {
     const HEX_CHARS: [u8; 16] = *b"0123456789ABCDEF";
     unsafe {
         video::print("0x\0");
+        if num == 0 {
+            video::print("0\0");
+            return;
+        }
+        // Find the highest non-zero nibble
+        let mut started = false;
         let mut shift: i32 = 60;
         while shift >= 0 {
             let nibble = ((num >> (shift as u64)) & 0xF) as usize;
-            let ch = HEX_CHARS[nibble];
-            let s: [u8; 2] = [ch, 0];
-            video::print(core::str::from_utf8_unchecked(&s));
+            if nibble != 0 || started {
+                started = true;
+                let ch = HEX_CHARS[nibble];
+                let s: [u8; 2] = [ch, 0];
+                video::print(core::str::from_utf8_unchecked(&s));
+            }
             shift -= 4;
         }
     }
@@ -219,7 +228,8 @@ pub extern "C" fn irq_handler(irq: u64) {
             32 => {
                 static mut TICK: u64 = 0;
                 TICK += 1;
-                if TICK % 100 == 0 {
+                if TICK % 1200 == 0 {
+                    // Every second
                     video::print("Timer: \0");
                     print_hex_u64(TICK);
                     video::print("\n\0");
