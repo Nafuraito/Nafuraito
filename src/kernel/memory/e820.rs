@@ -122,9 +122,9 @@ impl E820Entry {
 /// Represents the complete memory map collected by the bootloader.
 pub struct MemoryMap {
     /// Pointer to the memory map entries
-    entries_ptr: *const E820Entry,
+    pub(crate) entries_ptr: *const E820Entry,
     /// Number of entries in the map
-    count: usize,
+    pub(crate) count: usize,
 }
 
 impl MemoryMap {
@@ -285,53 +285,4 @@ impl MemoryMap {
     }
 }
 
-/// Global memory map storage
-static mut MEMORY_MAP_STORAGE: MemoryMapStorage = MemoryMapStorage {
-    map: MemoryMap { entries_ptr: core::ptr::null(), count: 0 },
-    initialized: false,
-};
-
-/// Storage wrapper for memory map
-struct MemoryMapStorage {
-    map: MemoryMap,
-    initialized: bool,
-}
-
-/// Initialize the global memory map
-///
-/// # Safety
-/// Must be called exactly once during kernel initialization,
-/// after the bootloader has set up the memory map.
-pub unsafe fn init(memory_map_addr: u64) {
-    MEMORY_MAP_STORAGE.map = MemoryMap::parse(memory_map_addr);
-    MEMORY_MAP_STORAGE.initialized = true;
-}
-
-/// Get a reference to the global memory map
-#[allow(static_mut_refs)]
-pub fn get() -> Option<&'static MemoryMap> {
-    unsafe {
-        if MEMORY_MAP_STORAGE.initialized {
-            Some(&MEMORY_MAP_STORAGE.map)
-        } else {
-            None
-        }
-    }
-}
-
-/// Format a byte size as a human-readable string (KB, MB, GB)
-pub fn format_size(bytes: u64) -> (u64, &'static str) {
-    const KB: u64 = 1024;
-    const MB: u64 = 1024 * KB;
-    const GB: u64 = 1024 * MB;
-
-    if bytes >= GB {
-        (bytes / GB, "GB")
-    } else if bytes >= MB {
-        (bytes / MB, "MB")
-    } else if bytes >= KB {
-        (bytes / KB, "KB")
-    } else {
-        (bytes, "B")
-    }
-}
+// Global state and utility functions are in lib.rs

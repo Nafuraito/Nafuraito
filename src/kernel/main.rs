@@ -130,6 +130,16 @@ mod memory {
         pub fn init(memory_map_addr: u64);
         pub fn memory_get_total_usable() -> u64;
         pub fn memory_get_highest_address() -> u64;
+        
+        // PMM functions (Physical Memory Manager)
+        pub fn pmm_init_c(memory_map_addr: u64) -> i32;
+        pub fn pmm_alloc_frame() -> u64;
+        pub fn pmm_free_frame(addr: u64) -> i32;
+        pub fn pmm_free_memory() -> u64;
+        pub fn pmm_used_memory() -> u64;
+        pub fn pmm_total_memory() -> u64;
+        pub fn pmm_free_frame_count() -> u64;
+        pub fn pmm_is_initialized() -> i32;
     }
 }
 
@@ -285,10 +295,23 @@ pub extern "C" fn enter(
         video::print("Welcome to Nafuraito OS!\n\0");
         video::print("GDT, IDT, PIC initialized... OK\n\0");
 
-        // Initialize Memory Manager
+        // Initialize Memory Manager (E820 parsing)
         video::print("Initializing Memory... \0");
         memory::init(memory_map_addr);
         video::print("OK\n\0");
+
+        // Initialize Physical Memory Manager (bitmap allocator)
+        video::print("Initializing PMM... \0");
+        let pmm_result = memory::pmm_init_c(memory_map_addr);
+        if pmm_result == 0 {
+            video::print("OK (\0");
+            print_hex_u64(memory::pmm_free_memory());
+            video::print(" bytes free)\n\0");
+        } else {
+            video::print("FAILED (error=\0");
+            print_hex_u64((-pmm_result) as u64);
+            video::print(")\n\0");
+        }
 
         // Initialize PCI
         video::print("Initializing PCI... \0");
