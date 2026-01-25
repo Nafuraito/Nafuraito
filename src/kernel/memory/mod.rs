@@ -9,6 +9,8 @@
 #![allow(unused)]
 
 pub mod e820;
+pub mod pmm;
 
 // Re-export commonly used types
 pub use self::e820::{E820Entry, E820Type, MemoryMap};
+pub use self::pmm::{PhysicalMemoryManager, alloc_frame, free_frame};
