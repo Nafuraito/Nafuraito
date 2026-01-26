@@ -98,10 +98,11 @@ impl PhysicalMemoryManager {
         }
 
         let bitmap_ptr = bitmap_base_address as *mut u8;
-
         //// Step 5: Initialize bitmap to "all used" (0xFF)
+        // Use volatile writes to prevent compiler from optimizing into SIMD memset
+        // (SSE is disabled in kernel, so SIMD instructions cause GPF)
         for byte_idx in 0..bitmap_size {
-            *bitmap_ptr.add(byte_idx) = 0xFF;
+            core::ptr::write_volatile(bitmap_ptr.add(byte_idx), 0xFF);
         }
 
         let mut free_frames: usize = 0;

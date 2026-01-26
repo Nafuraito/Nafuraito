@@ -128,27 +128,40 @@ pub struct MemoryMap {
 }
 
 impl MemoryMap {
-    /// Parse the E820 memory map from the bootloader
+    /// Parse the E820 memory map from bootloader format
+    /// 
+    /// The bootloader passes entries directly at memory_map_addr (24 bytes per entry).
+    /// We scan entries until we find an invalid one (type not 1-5 or length 0).
     ///
     /// # Safety
     /// This function reads from a fixed memory address that must have been
     /// populated by the bootloader with valid E820 data.
     pub unsafe fn parse(memory_map_addr: u64) -> Self {
-        let addr = memory_map_addr as usize;
+        let entries_ptr = memory_map_addr as *const E820Entry;
         
-        // First 4 bytes contain the entry count (stored as u16 by bootloader, padded)
-        let count_ptr = addr as *const u16;
-        let count = core::ptr::read_unaligned(count_ptr) as usize;
+        // Scan for valid entries - stop at invalid entry or max count
+        let mut count = 0usize;
         
-        // Entries start at offset 4
-        let entries_ptr = addr.wrapping_add(4) as *const E820Entry;
-        
-        // Use conditional instead of min to avoid checked operations
-        let safe_count = if count > MAX_MEMORY_ENTRIES { MAX_MEMORY_ENTRIES } else { count };
+        while count < MAX_MEMORY_ENTRIES {
+            let entry_ptr = entries_ptr.wrapping_add(count);
+            let entry = core::ptr::read_unaligned(entry_ptr);
+            
+            let region_type = entry.region_type;
+            let length = entry.length;
+            
+            // Valid E820 types are 1-5
+            if region_type < 1 || region_type > 5 {
+                break;
+            }
+            if length == 0 {
+                break;
+            }
+            count += 1;
+        }
         
         MemoryMap {
             entries_ptr,
-            count: safe_count,
+            count,
         }
     }
 

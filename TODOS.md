@@ -70,11 +70,11 @@
 
 ### Physical Memory Manager (PMM)
 - [X] Parse memory map from bootloader
-- [ ] Bitmap allocator implementation
+- [X] Bitmap allocator implementation
 - [ ] Free list allocator (alternative)
 - [ ] Buddy allocator (alternative)
-- [ ] Page frame allocation (`alloc_frame`)
-- [ ] Page frame deallocation (`free_frame`)
+- [X] Page frame allocation (`alloc_frame`)
+- [X] Page frame deallocation (`free_frame`)
 - [X] Memory statistics tracking
 - [ ] DMA-capable memory zones
 - [ ] NUMA awareness (multi-socket systems)
