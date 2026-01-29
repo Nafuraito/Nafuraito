@@ -16,7 +16,12 @@
 // =============================================================================
 
 mod e820;
-pub use e820::{E820Type, E820Entry, MemoryMap, MEMORY_MAP_ADDR, MAX_MEMORY_ENTRIES};
+pub use e820::{
+    E820Type, E820Entry, E820EntryExtended, MemoryMap, 
+    MEMORY_MAP_ADDR, MAX_MEMORY_ENTRIES,
+    MemoryZone, NumaNode,
+    DMA_ZONE_END, DMA32_ZONE_END, MAX_NUMA_NODES,
+};
 
 // =============================================================================
 // Global State
