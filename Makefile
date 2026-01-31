@@ -61,8 +61,7 @@ run: all
 
 # Run with debug output
 run-debug: all
-	qemu-system-x86_64 -m 1024 -drive file=$(BUILD_DIR)/disk.img,format=raw -boot c \
-		-serial stdio -d int,cpu_reset -no-reboot -no-shutdown
+	qemu-system-x86_64 -m 512M -drive file=$(BUILD_DIR)/disk.img,format=raw -boot c -enable-kvm -smp 1 -net nic -net user -serial stdio -display none
 
 clean:
 	rm -rf $(BUILD_DIR)

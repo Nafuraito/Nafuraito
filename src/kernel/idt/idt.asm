@@ -14,6 +14,7 @@ idt_load:
 ; Common exception handler stub
 ; Saves registers, calls Rust handler, restores registers
 extern exception_handler
+
 isr_common:
     ; Save all registers
     push rax
@@ -33,11 +34,13 @@ isr_common:
     push r15
 
     ; Call Rust exception handler
-    ; RDI = interrupt vector (already pushed by ISR stub)
-    ; RSI = error code (already pushed by ISR stub or 0)
     mov rdi, [rsp + 15*8]  ; Get vector number
     mov rsi, [rsp + 16*8]  ; Get error code
+    mov rdx, [rsp + 17*8]  ; RIP
+    mov rcx, [rsp + 18*8]  ; CS
+    mov r8,  [rsp + 19*8]  ; RFLAGS
     call exception_handler
+
 
     ; Restore all registers
     pop r15

@@ -136,12 +136,79 @@ pub struct PhysicalMemoryManager {
 }
 
 impl PhysicalMemoryManager {
+    #[inline(always)]
+    unsafe fn serial_outb(val: u8) {
+        core::arch::asm!("out dx, al", in("dx") 0x3F8u16, in("al") val, options(nomem, nostack));
+    }
+
+    #[inline(always)]
+    unsafe fn serial_print_str(s: &str) {
+        for &b in s.as_bytes() {
+            Self::serial_outb(b);
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn serial_print_hex_u64(mut num: u64) {
+        const HEX: &[u8; 16] = b"0123456789ABCDEF";
+        Self::serial_print_str("0x");
+        if num == 0 {
+            Self::serial_print_str("0");
+            return;
+        }
+        let mut buf = [0u8; 16];
+        let mut i = 0usize;
+        while num > 0 && i < 16 {
+            let digit = (num & 0xF) as usize;
+            buf[i] = HEX[digit];
+            num >>= 4;
+            i += 1;
+        }
+        while i > 0 {
+            i -= 1;
+            Self::serial_outb(buf[i]);
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn debug_print_hex_u64(mut num: u64) {
+        extern "C" {
+            fn writestring_vga(data: *const i8);
+        }
+        const HEX: &[u8; 16] = b"0123456789ABCDEF";
+        writestring_vga("0x\0".as_ptr() as *const i8);
+        if num == 0 {
+            writestring_vga("0\0".as_ptr() as *const i8);
+            return;
+        }
+        let mut buf = [0u8; 17];
+        let mut i = 0usize;
+        while num > 0 && i < 16 {
+            let digit = (num & 0xF) as usize;
+            buf[i] = HEX[digit];
+            num >>= 4;
+            i += 1;
+        }
+        while i > 0 {
+            i -= 1;
+            let s = [buf[i], 0];
+            writestring_vga(s.as_ptr() as *const i8);
+        }
+    }
+
     /// Initialize the Physical Memory Manager
     /// 
     /// # Safety
     /// Must be called after memory map is initialized.
     /// Writes to physical memory for bitmap storage.
-    pub unsafe fn init(memory_map: &MemoryMap) -> Result<Self, MemoryError> {
+    /// Writes directly to PMM_INSTANCE to avoid struct return ABI issues.
+    pub unsafe fn init(memory_map: &MemoryMap) -> Result<(), MemoryError> {
+        extern "C" {
+            fn writestring_vga(data: *const i8);
+        }
+        
+        Self::serial_print_str("PMM: Initializing...\n");
+        
         //// Step 1: Get highest address and validate
         let highest_address = memory_map.highest_usable_address();
 
@@ -159,8 +226,9 @@ impl PhysicalMemoryManager {
         let bitmap_size_aligned = ((bitmap_size + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE;
 
         //// Step 3: Find a suitable region for the bitmap
-        // Kernel occupies 1MB to 9MB (0x100000 to 0x900000), so bitmap must go after
-        const KERNEL_END: u64 = 0x100000 + (8 * 1024 * 1024); // 9MB
+        // Kernel occupies 1MB to 10MB (0x100000 to 0xA00000), so bitmap must go after
+        // Reserve extra space for the kernel stack (bootloader sets RSP to 0x900000)
+        const KERNEL_END: u64 = 0x100000 + (9 * 1024 * 1024); // 10MB
         
         let entry_count = memory_map.entry_count();
         let mut bitmap_base_address: u64 = 0;
@@ -210,6 +278,13 @@ impl PhysicalMemoryManager {
         }
 
         let bitmap_ptr = bitmap_base_address as *mut u8;
+        
+        Self::serial_print_str("PMM: bitmap at ");
+        Self::serial_print_hex_u64(bitmap_base_address);
+        Self::serial_print_str(", ");
+        Self::serial_print_hex_u64(total_frames as u64);
+        Self::serial_print_str(" frames\n");
+        
         //// Step 5: Initialize bitmap to "all used" (0xFF)
         // Use volatile writes to prevent compiler from optimizing into SIMD memset
         // (SSE is disabled in kernel, so SIMD instructions cause GPF)
@@ -255,10 +330,17 @@ impl PhysicalMemoryManager {
         let reserved_end_frame: usize = 0x100000 / PAGE_SIZE;
         Self::mark_region_used_static(0, reserved_end_frame, bitmap_ptr, &mut free_frames);
 
-        // Kernel memory region (1MB to 9MB)
+        // Kernel memory region (1MB to 10MB)
         let kernel_start_frame: usize = 0x100000 / PAGE_SIZE;
-        let kernel_end_frame: usize = (0x100000 + 8 * 1024 * 1024) / PAGE_SIZE;
+        let kernel_end_frame: usize = (0x100000 + 9 * 1024 * 1024) / PAGE_SIZE;
         Self::mark_region_used_static(kernel_start_frame, kernel_end_frame, bitmap_ptr, &mut free_frames);
+
+        // Kernel stack region (32MB - 1MB)
+        const KERNEL_STACK_TOP: u64 = 0x2000000; // 32MB
+        const KERNEL_STACK_SIZE: u64 = 0x100000; // 1MB
+        let stack_start_frame: usize = ((KERNEL_STACK_TOP - KERNEL_STACK_SIZE) / PAGE_SIZE as u64) as usize;
+        let stack_end_frame: usize = (KERNEL_STACK_TOP / PAGE_SIZE as u64) as usize;
+        Self::mark_region_used_static(stack_start_frame, stack_end_frame, bitmap_ptr, &mut free_frames);
 
         // Bitmap itself
         let bitmap_start_frame = (bitmap_base_address / PAGE_SIZE as u64) as usize;
@@ -289,27 +371,11 @@ impl PhysicalMemoryManager {
         let dma_end_frame = (DMA_ZONE_END / PAGE_SIZE as u64) as usize;
         let dma32_end_frame = (DMA32_ZONE_END / PAGE_SIZE as u64) as usize;
         
-        // Count frames per zone
-        for frame_idx in 0..total_frames {
-            let addr = (frame_idx * PAGE_SIZE) as u64;
-            let zone_idx = if addr < DMA_ZONE_END {
-                0 // DMA
-            } else if addr < DMA32_ZONE_END {
-                1 // DMA32
-            } else {
-                2 // Normal
-            };
-            
-            zones[zone_idx].total_frames += 1;
-            
-            // Check if frame is free
-            let byte_idx = frame_idx / 8;
-            let bit_offset = frame_idx % 8;
-            let byte_value = *bitmap_ptr.add(byte_idx);
-            if (byte_value & (1 << bit_offset)) == 0 {
-                zones[zone_idx].free_frames += 1;
-            }
-        }
+        zones[0].total_frames = if total_frames < dma_end_frame { total_frames } else { dma_end_frame };
+        zones[1].total_frames = if total_frames > dma_end_frame { 
+            if total_frames < dma32_end_frame { total_frames - dma_end_frame } else { dma32_end_frame - dma_end_frame }
+        } else { 0 };
+        zones[2].total_frames = if total_frames > dma32_end_frame { total_frames - dma32_end_frame } else { 0 };
 
         //// Step 10: Initialize NUMA statistics (default to single node)
         let numa_count = 1;
@@ -317,8 +383,8 @@ impl PhysicalMemoryManager {
         numa_nodes[0].total_frames = total_frames;
         numa_nodes[0].free_frames = free_frames;
 
-        //// Step 11: Return initialized PMM
-        Ok(PhysicalMemoryManager {
+        //// Step 11: Write directly to PMM_INSTANCE to avoid struct return ABI issues
+        let pmm = PhysicalMemoryManager {
             bitmap: bitmap_ptr,
             bitmap_size,
             bitmap_size_aligned,
@@ -329,7 +395,20 @@ impl PhysicalMemoryManager {
             zones,
             numa_nodes,
             numa_count,
-        })
+        };
+        
+        // Write to the global static directly
+        core::ptr::write_volatile(&raw mut PMM_INSTANCE, Some(pmm));
+        
+        Self::serial_print_str("PMM: ");
+        Self::serial_print_hex_u64(free_frames as u64);
+        Self::serial_print_str(" free frames (");
+        Self::serial_print_hex_u64((free_frames * PAGE_SIZE / 1024 / 1024) as u64);
+        Self::serial_print_str(" MB)\n");
+        
+        // Return simple success value (no struct copy needed)
+        Self::serial_print_str("PMM: returning success\n");
+        Ok(())
     }
 
     /// Static helper to mark a region as used during initialization
@@ -912,13 +991,8 @@ static mut PMM_INSTANCE: Option<PhysicalMemoryManager> = None;
 /// # Safety
 /// Must be called exactly once during kernel initialization.
 pub unsafe fn pmm_init(memory_map: &MemoryMap) -> Result<(), MemoryError> {
-    match PhysicalMemoryManager::init(memory_map) {
-        Ok(pmm) => {
-            PMM_INSTANCE = Some(pmm);
-            Ok(())
-        }
-        Err(e) => Err(e),
-    }
+    // init() now writes directly to PMM_INSTANCE and returns Result<(), MemoryError>
+    PhysicalMemoryManager::init(memory_map)
 }
 
 /// Allocate a physical frame using the global PMM
@@ -988,17 +1062,29 @@ pub fn pmm_used_memory() -> u64 {
 #[no_mangle]
 #[allow(static_mut_refs)]
 pub unsafe extern "C" fn pmm_init_c(_memory_map_addr: u64) -> i32 {
-    // Use the already-initialized global memory map instead of re-parsing
+    // Check if memory map is initialized
     if !MEMORY_MAP_STORAGE.initialized {
-        return -9; // Memory map not initialized
+        PhysicalMemoryManager::serial_print_str("PMM: ERROR - Memory map not initialized!\n");
+        return -9;
     }
     
+    // Call init (writes directly to PMM_INSTANCE)
     match PhysicalMemoryManager::init(&MEMORY_MAP_STORAGE.map) {
-        Ok(pmm) => {
-            PMM_INSTANCE = Some(pmm);
-            0 // Success
+        Ok(()) => {
+            // Verify PMM_INSTANCE is now Some
+            if PMM_INSTANCE.is_some() {
+                0
+            } else {
+                PhysicalMemoryManager::serial_print_str("PMM: ERROR - PMM_INSTANCE is None!\n");
+                -10
+            }
         }
-        Err(e) => -(e.code as i32), // Return negative error code
+        Err(e) => {
+            PhysicalMemoryManager::serial_print_str("PMM: Init failed: ");
+            PhysicalMemoryManager::serial_print_str(e.message);
+            PhysicalMemoryManager::serial_print_str("\n");
+            -(e.code as i32)
+        }
     }
 }
 

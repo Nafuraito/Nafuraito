@@ -468,7 +468,7 @@ long_mode_entry:
 load_kernel:
     ; Set up stack for C code (16-byte aligned)
     ; Use a safe location that won't conflict with anything
-    mov rsp, 0x900000
+     mov rsp, 0x2000000
     and rsp, ~0xF                       ; Ensure 16-byte alignment
     
     ; Reserve space for structures (64 bytes for alignment + red zone safety)
@@ -526,7 +526,7 @@ load_kernel:
     mov rbx, rax
     
     ; Set up fresh stack for kernel (16-byte aligned)
-    mov rsp, 0x900000
+     mov rsp, 0x2000000
     and rsp, ~0xF
     
     ; Pass boot info to kernel via registers (System V AMD64 ABI):

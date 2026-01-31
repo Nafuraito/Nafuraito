@@ -10,6 +10,41 @@
 
 use core::panic::PanicInfo;
 
+// Simple serial output for debugging (COM1)
+#[inline(always)]
+unsafe fn serial_outb(val: u8) {
+    core::arch::asm!("out dx, al", in("dx") 0x3F8u16, in("al") val, options(nomem, nostack));
+}
+
+#[inline(always)]
+unsafe fn serial_print(s: &str) {
+    for &b in s.as_bytes() {
+        serial_outb(b);
+    }
+}
+
+#[inline(always)]
+unsafe fn serial_print_hex_u64(mut num: u64) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    serial_print("0x");
+    if num == 0 {
+        serial_print("0");
+        return;
+    }
+    let mut buf = [0u8; 16];
+    let mut i = 0usize;
+    while num > 0 && i < 16 {
+        let digit = (num & 0xF) as usize;
+        buf[i] = HEX[digit];
+        num >>= 4;
+        i += 1;
+    }
+    while i > 0 {
+        i -= 1;
+        serial_outb(buf[i]);
+    }
+}
+
 /// Panic handler for the kernel
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -209,17 +244,38 @@ fn print_hex_u64(num: u64) {
 // =============================================================================
 
 #[no_mangle]
-pub extern "C" fn exception_handler(vector: u64, error_code: u64) {
+pub extern "C" fn exception_handler(
+    vector: u64,
+    error_code: u64,
+    rip: u64,
+    cs: u64,
+    rflags: u64,
+) {
     let exception_name = match vector {
-        0 => "Divide Error", 1 => "Debug", 2 => "NMI", 3 => "Breakpoint",
-        4 => "Overflow", 5 => "Bound Range", 6 => "Invalid Opcode", 7 => "Device Not Available",
-        8 => "Double Fault", 10 => "Invalid TSS", 11 => "Segment Not Present",
-        12 => "Stack Fault", 13 => "General Protection Fault", 14 => "Page Fault",
-        16 => "FPU Error", 17 => "Alignment Check", 18 => "Machine Check",
-        19 => "SIMD Exception", 20 => "Virtualization", 21 => "Control Protection",
-        _ => "Unknown",
+        0 => "Divide Error\0", 1 => "Debug\0", 2 => "NMI\0", 3 => "Breakpoint\0",
+        4 => "Overflow\0", 5 => "Bound Range\0", 6 => "Invalid Opcode\0", 7 => "Device Not Available\0",
+        8 => "Double Fault\0", 10 => "Invalid TSS\0", 11 => "Segment Not Present\0",
+        12 => "Stack Fault\0", 13 => "General Protection Fault\0", 14 => "Page Fault\0",
+        16 => "FPU Error\0", 17 => "Alignment Check\0", 18 => "Machine Check\0",
+        19 => "SIMD Exception\0", 20 => "Virtualization\0", 21 => "Control Protection\0",
+        _ => "Unknown\0",
     };
     unsafe {
+        serial_print("EXCEPTION: ");
+        serial_print(exception_name);
+        serial_print(" (vector=");
+        serial_print_hex_u64(vector);
+        serial_print(", error=");
+        serial_print_hex_u64(error_code);
+        serial_print(")\n");
+        serial_print("  RIP=");
+        serial_print_hex_u64(rip);
+        serial_print(" CS=");
+        serial_print_hex_u64(cs);
+        serial_print(" RFLAGS=");
+        serial_print_hex_u64(rflags);
+        serial_print("\n");
+
         video::print("EXCEPTION: \0");
         video::print(exception_name);
         video::print(" (vector=\0");
@@ -227,6 +283,13 @@ pub extern "C" fn exception_handler(vector: u64, error_code: u64) {
         video::print(", error=\0");
         print_hex_u64(error_code);
         video::print(")\n\0");
+        video::print("  RIP=\0");
+        print_hex_u64(rip);
+        video::print(" CS=\0");
+        print_hex_u64(cs);
+        video::print(" RFLAGS=\0");
+        print_hex_u64(rflags);
+        video::print("\n\0");
         loop { core::arch::asm!("hlt"); }
     }
 }
@@ -299,10 +362,24 @@ pub extern "C" fn enter(
         video::print("Initializing Memory... \0");
         memory::init(memory_map_addr);
         video::print("OK\n\0");
+        
+        // Debug: Print highest address
+        video::print("  Highest addr: \0");
+        print_hex_u64(memory::memory_get_highest_address());
+        video::print("\n\0");
 
         // Initialize Physical Memory Manager (bitmap allocator)
-        video::print("Initializing PMM... \0");
+        video::print("Initializing PMM...\n\0");
+        video::print("  Memory map addr: \0");
+        print_hex_u64(memory_map_addr);
+        video::print("\n  Total usable: \0");
+        print_hex_u64(memory::memory_get_total_usable());
+        video::print("\n  Starting PMM init...\n\0");
+
         let pmm_result = memory::pmm_init_c(memory_map_addr);
+        video::print("PMM init returned: \0");
+        print_hex_byte(pmm_result as u8);
+        video::print("\n\0");
         if pmm_result == 0 {
             video::print("OK (\0");
             print_hex_u64(memory::pmm_free_memory());
