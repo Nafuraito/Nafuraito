@@ -86,8 +86,9 @@
 - [X] Bootloader LA57 initialization
 - [X] Runtime paging mode detection
 - [X] Page table creation/destruction
-- [ ] Virtual address mapping (`map_page`) - stub implemented
-- [ ] Virtual address unmapping (`unmap_page`) - stub implemented
+- [X] Virtual address mapping (`map_page`)
+- [X] Virtual address unmapping (`unmap_page`)
+- [X] Automatic empty page table cleanup
 - [X] Permission bits (R/W/X, User/Supervisor)
 - [X] NX (No-Execute) bit support
 - [X] TLB management (flush, invalidate)

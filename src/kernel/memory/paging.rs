@@ -1341,16 +1341,106 @@ pub unsafe extern "C" fn paging_map_page(virt_addr: u64, phys_addr: u64, flags: 
     0
 }
 
-/// Unmap a page (C wrapper)
-/// Returns 0 on success, -1 on error
+/// Unmap a page (C wrapper) - implements page table walk directly
+/// Returns 0 on success, negative error code on failure
 #[no_mangle]
 pub unsafe extern "C" fn paging_unmap_page(virt_addr: u64) -> i32 {
-    let virt = VirtAddr::new(virt_addr);
+    // Get manager
+    let manager = match get_paging_manager() {
+        Some(m) => m,
+        None => return -1,
+    };
     
-    match unmap_page(virt) {
-        Ok(_) => 0,
-        Err(_) => -1,
+    let root_phys = manager.root_table_phys();
+    
+    // Extract indices
+    let pml4_idx = ((virt_addr >> 39) & 0x1FF) as usize;
+    let pdpt_idx = ((virt_addr >> 30) & 0x1FF) as usize;
+    let pd_idx = ((virt_addr >> 21) & 0x1FF) as usize;
+    let pt_idx = ((virt_addr >> 12) & 0x1FF) as usize;
+    
+    // Walk to PML4
+    let pml4 = root_phys as *mut u64;
+    let pml4_entry = pml4.add(pml4_idx);
+    if (*pml4_entry & 1) == 0 {
+        return -2; // Page not mapped (PML4)
     }
+    let pdpt_phys = *pml4_entry & !0xFFF;
+    
+    // Walk to PDPT
+    let pdpt = pdpt_phys as *mut u64;
+    let pdpt_entry = pdpt.add(pdpt_idx);
+    if (*pdpt_entry & 1) == 0 {
+        return -3; // Page not mapped (PDPT)
+    }
+    let pd_phys = *pdpt_entry & !0xFFF;
+    
+    // Walk to PD
+    let pd = pd_phys as *mut u64;
+    let pd_entry = pd.add(pd_idx);
+    if (*pd_entry & 1) == 0 {
+        return -4; // Page not mapped (PD)
+    }
+    let pt_phys = *pd_entry & !0xFFF;
+    
+    // Walk to PT and clear entry
+    let pt = pt_phys as *mut u64;
+    let pt_entry = pt.add(pt_idx);
+    if (*pt_entry & 1) == 0 {
+        return -5; // Page not mapped (PT)
+    }
+    *pt_entry = 0; // Clear the entry
+    
+    // Check if PT is now empty and free it
+    let mut pt_empty = true;
+    for i in 0..512 {
+        if *pt.add(i) != 0 {
+            pt_empty = false;
+            break;
+        }
+    }
+    
+    if pt_empty {
+        *pd_entry = 0; // Clear PD entry
+        
+        extern "C" {
+            fn pmm_free_frame(addr: u64) -> i32;
+        }
+        pmm_free_frame(pt_phys);
+        
+        // Check if PD is now empty
+        let mut pd_empty = true;
+        for i in 0..512 {
+            if *pd.add(i) != 0 {
+                pd_empty = false;
+                break;
+            }
+        }
+        
+        if pd_empty {
+            *pdpt_entry = 0; // Clear PDPT entry
+            pmm_free_frame(pd_phys);
+            
+            // Check if PDPT is now empty
+            let mut pdpt_empty = true;
+            for i in 0..512 {
+                if *pdpt.add(i) != 0 {
+                    pdpt_empty = false;
+                    break;
+                }
+            }
+            
+            if pdpt_empty {
+                *pml4_entry = 0; // Clear PML4 entry
+                pmm_free_frame(pdpt_phys);
+            }
+        }
+    }
+    
+    // Flush TLB
+    invlpg(virt_addr);
+    
+    0
 }
 
 /// Translate virtual to physical address (C wrapper)
