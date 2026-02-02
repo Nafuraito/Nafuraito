@@ -301,6 +301,77 @@ enable_a20:
     ret
 
 ; ============================================================================
+; Check CPU Features (LA57, NX, etc.)
+; ============================================================================
+[BITS 32]
+check_cpu_features:
+    ; Save registers
+    push ebx
+    push ecx
+    push edx
+
+    ; Check for CPUID support (toggle bit 21 in EFLAGS)
+    pushfd
+    pop eax
+    mov ecx, eax
+    xor eax, (1 << 21)
+    push eax
+    popfd
+    pushfd
+    pop eax
+    push ecx
+    popfd
+    xor eax, ecx
+    jz .no_cpuid
+
+    ; Check maximum CPUID leaf
+    xor eax, eax
+    cpuid
+    cmp eax, 7
+    jb .no_la57                 ; Need leaf 7 for LA57 check
+
+    ; Check LA57 support: CPUID.07H:ECX.LA57[bit 16]
+    mov eax, 7
+    xor ecx, ecx
+    cpuid
+    test ecx, (1 << 16)
+    jz .no_la57
+    mov byte [cpu_la57_supported], 1
+    jmp .check_nx
+
+.no_la57:
+    mov byte [cpu_la57_supported], 0
+
+.check_nx:
+    ; Check NX support: CPUID.80000001H:EDX.NX[bit 20]
+    mov eax, 0x80000000
+    cpuid
+    cmp eax, 0x80000001
+    jb .no_nx
+
+    mov eax, 0x80000001
+    cpuid
+    test edx, (1 << 20)
+    jz .no_nx
+    mov byte [cpu_nx_supported], 1
+    jmp .done
+
+.no_nx:
+    mov byte [cpu_nx_supported], 0
+    jmp .done
+
+.no_cpuid:
+    mov byte [cpu_la57_supported], 0
+    mov byte [cpu_nx_supported], 0
+
+.done:
+    ; Restore registers
+    pop edx
+    pop ecx
+    pop ebx
+    ret
+
+; ============================================================================
 ; 32-bit Protected Mode Entry
 ; ============================================================================
 [SECTION .text]
@@ -325,16 +396,27 @@ protected_mode_entry:
     mov ss, ax
     mov esp, 0x90000
 
-    ; Set up paging for long mode
+    ; Check CPU features (LA57, NX, etc.)
+    call check_cpu_features
+
+    ; Set up paging for long mode (will use LA57 if available)
     call setup_paging
 
     ; Enable PAE (Physical Address Extension)
     mov eax, cr4
     or eax, (1 << 5)            ; Set PAE bit
+    
+    ; Enable LA57 if supported (must be done before enabling paging!)
+    mov bl, [cpu_la57_supported]
+    test bl, bl
+    jz .no_la57
+    or eax, (1 << 12)           ; Set LA57 bit in CR4
+    mov byte [cpu_la57_enabled], 1
+.no_la57:
     mov cr4, eax
 
-    ; Load PML4 address into CR3
-    mov eax, 0x10000            ; PML4 table at 0x10000
+    ; Load PML4 or PML5 address into CR3
+    mov eax, [paging_root_addr]
     mov cr3, eax
 
     ; Enable long mode via EFER MSR
@@ -355,11 +437,34 @@ protected_mode_entry:
     jmp 0x08:long_mode_entry
 
 ; ============================================================================
-; Setup Paging (Identity map first 4GB)
-; Page tables located at 0x10000-0x16000 to avoid conflicts with stage2
+; Setup Paging (Identity map first 4GB with LA57 support)
+; For LA57: Page tables at 0x10000-0x18000
+; For LA48: Page tables at 0x10000-0x16000
 ; ============================================================================
 [BITS 32]
 setup_paging:
+    ; Check if LA57 is supported
+    mov al, [cpu_la57_supported]
+    test al, al
+    jnz .setup_la57
+
+    ; Setup 4-level paging (LA48)
+    call setup_paging_4level
+    mov dword [paging_root_addr], 0x10000  ; PML4 at 0x10000
+    ret
+
+.setup_la57:
+    ; Setup 5-level paging (LA57)
+    call setup_paging_5level
+    mov dword [paging_root_addr], 0x10000  ; PML5 at 0x10000
+    ret
+
+; ============================================================================
+; Setup 4-Level Paging (LA48)
+; Page tables located at 0x10000-0x16000
+; ============================================================================
+[BITS 32]
+setup_paging_4level:
     ; Clear page table area (0x10000 - 0x16000)
     mov edi, 0x10000
     xor eax, eax
@@ -414,6 +519,80 @@ setup_paging:
 
     ; PD at 0x15000: maps 0xC0000000 - 0xFFFFFFFF
     mov edi, 0x15000
+    mov eax, 0xC0000083
+    mov ecx, 512
+.fill_pd4:
+    mov [edi], eax
+    add eax, 0x200000
+    add edi, 8
+    loop .fill_pd4
+
+    ret
+
+; ============================================================================
+; Setup 5-Level Paging (LA57)
+; Page tables located at 0x10000-0x18000
+; PML5 -> PML4 -> PDPT -> PD (2MB pages)
+; ============================================================================
+[BITS 32]
+setup_paging_5level:
+    ; Clear page table area (0x10000 - 0x18000) - 32KB
+    mov edi, 0x10000
+    xor eax, eax
+    mov ecx, 0x8000 / 4         ; 32KB / 4 bytes = 8192 dwords
+    rep stosd
+
+    ; PML5[0] -> PML4 at 0x11000
+    mov dword [0x10000], 0x11003  ; Present + Writable + PML4 address
+
+    ; PML4[0] -> PDPT at 0x12000
+    mov dword [0x11000], 0x12003  ; Present + Writable + PDPT address
+
+    ; PDPT[0] -> PD at 0x13000 (first 1GB)
+    mov dword [0x12000], 0x13003  ; Present + Writable + PD address
+
+    ; PDPT[1] -> PD at 0x14000 (second 1GB)
+    mov dword [0x12008], 0x14003
+
+    ; PDPT[2] -> PD at 0x15000 (third 1GB)
+    mov dword [0x12010], 0x15003
+
+    ; PDPT[3] -> PD at 0x16000 (fourth 1GB)
+    mov dword [0x12018], 0x16003
+
+    ; Fill Page Directories with 2MB pages (identity mapping)
+    ; PD at 0x13000: maps 0x00000000 - 0x3FFFFFFF
+    mov edi, 0x13000
+    mov eax, 0x83               ; Present + Writable + 2MB page
+    mov ecx, 512
+.fill_pd1:
+    mov [edi], eax
+    add eax, 0x200000           ; 2MB per entry
+    add edi, 8
+    loop .fill_pd1
+
+    ; PD at 0x14000: maps 0x40000000 - 0x7FFFFFFF
+    mov edi, 0x14000
+    mov eax, 0x40000083
+    mov ecx, 512
+.fill_pd2:
+    mov [edi], eax
+    add eax, 0x200000
+    add edi, 8
+    loop .fill_pd2
+
+    ; PD at 0x15000: maps 0x80000000 - 0xBFFFFFFF
+    mov edi, 0x15000
+    mov eax, 0x80000083
+    mov ecx, 512
+.fill_pd3:
+    mov [edi], eax
+    add eax, 0x200000
+    add edi, 8
+    loop .fill_pd3
+
+    ; PD at 0x16000: maps 0xC0000000 - 0xFFFFFFFF
+    mov edi, 0x16000
     mov eax, 0xC0000083
     mov ecx, 512
 .fill_pd4:
@@ -589,6 +768,9 @@ global vbe_height
 global vbe_bpp
 global memory_map_addr
 global memory_map_entries
+global cpu_la57_supported
+global cpu_la57_enabled
+global cpu_nx_supported
 
 vbe_framebuffer_addr:   dd 0
 vbe_pitch:              dw 0
@@ -605,6 +787,15 @@ best_pixels:            dd 0
 best_bpp:               db 0
                         db 0    ; Padding
 current_mode:           dw 0    ; Temp storage for current mode during scan
+
+; CPU feature flags
+cpu_la57_supported:     db 0
+cpu_la57_enabled:       db 0
+cpu_nx_supported:       db 0
+                        db 0    ; Padding
+
+; Paging configuration
+paging_root_addr:       dd 0    ; Physical address of root page table (PML4 or PML5)
 
 ; ============================================================================
 ; GDT for Protected Mode (32-bit)

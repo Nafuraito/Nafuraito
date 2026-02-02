@@ -18,7 +18,7 @@ $(BUILD_DIR)/$(LIB_NAME): $(BUILD_DIR)/memory_rs.o
 	@echo "Built $(LIB_NAME)"
 
 # Compile Rust library (depends on all source files)
-$(BUILD_DIR)/memory_rs.o: lib.rs e820.rs pmm.rs
+$(BUILD_DIR)/memory_rs.o: lib.rs e820.rs pmm.rs paging.rs
 	$(RUSTC) $< -o $@
 
 clean:

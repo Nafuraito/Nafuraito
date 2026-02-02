@@ -76,16 +76,21 @@
 - [X] Page frame allocation (`alloc_frame`)
 - [X] Page frame deallocation (`free_frame`)
 - [X] Memory statistics tracking
-- [ ] DMA-capable memory zones
-- [ ] NUMA awareness (multi-socket systems)
+- [X] DMA-capable memory zones
+- [X] NUMA awareness (multi-socket systems)
 
 ### Virtual Memory Manager (VMM)
 - [X] 4-level paging (PML4 → PDPT → PD → PT)
-- [ ] 5-level paging support (LA57) for large memory
+- [X] 5-level paging support (LA57) for large memory
+- [X] CPUID detection for LA57 support
+- [X] Bootloader LA57 initialization
+- [X] Runtime paging mode detection
 - [X] Page table creation/destruction
-- [ ] Virtual address mapping (`map_page`)
-- [ ] Virtual address unmapping (`unmap_page`)
+- [ ] Virtual address mapping (`map_page`) - stub implemented
+- [ ] Virtual address unmapping (`unmap_page`) - stub implemented
 - [X] Permission bits (R/W/X, User/Supervisor)
+- [X] NX (No-Execute) bit support
+- [X] TLB management (flush, invalidate)
 - [ ] Page attribute table (PAT) support
 - [ ] Copy-on-Write (CoW) implementation
 - [ ] Demand paging

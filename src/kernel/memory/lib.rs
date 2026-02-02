@@ -118,4 +118,49 @@ pub struct MemoryError {
 // =============================================================================
 
 mod pmm;
-pub use pmm::*;
+pub use pmm::{
+    PhysicalMemoryManager, ZoneStats, NumaStats, AllocFlags,
+    alloc_frame, free_frame, pmm_init,
+    pmm_init_c, pmm_alloc_frame, pmm_free_frame,
+    pmm_free_memory, pmm_used_memory, pmm_total_memory,
+    pmm_free_frame_count, pmm_used_frame_count,
+    pmm_is_initialized, pmm_is_frame_used,
+    pmm_alloc_frame_in_zone, pmm_alloc_dma_frame, pmm_alloc_dma32_frame,
+    pmm_zone_free_memory, pmm_zone_total_memory,
+    pmm_alloc_frame_numa, pmm_numa_node_count,
+    pmm_numa_free_memory, pmm_numa_total_memory,
+    pmm_alloc_frames_contiguous, pmm_free_frames_contiguous,
+    pmm_memory_usage_percent, pmm_is_memory_critical,
+};
+
+// =============================================================================
+// Paging (Virtual Memory) - imported from paging.rs
+// =============================================================================
+
+mod paging;
+pub use paging::{
+    PageTableFlags, PageTableEntry, PageTable,
+    PagingMode, PagingManager, VirtAddr, PhysAddr,
+    check_la57_support, check_nx_support,
+    is_la57_enabled, enable_la57, disable_la57,
+    read_cr3, write_cr3, read_cr4, write_cr4,
+    invlpg, flush_tlb,
+    paging_init, get_paging_manager,
+    map_page, unmap_page, translate_address,
+    identity_map_range, get_current_page_table,
+    switch_page_table, create_page_table,
+    map_range, unmap_range, remap_page, change_page_flags,
+    paging_check_la57_support, paging_check_nx_support,
+    paging_is_la57_enabled, paging_read_cr3,
+    paging_init_c, paging_get_mode,
+    paging_invlpg, paging_flush_tlb,
+    paging_test_simple,
+    paging_map_page, paging_unmap_page,
+    paging_translate_address, paging_is_mapped,
+    paging_identity_map_range,
+    PAGE_SIZE_2MB, PAGE_SIZE_1GB, PAGE_TABLE_ENTRIES,
+    LA48_VIRT_ADDR_BITS, LA57_VIRT_ADDR_BITS,
+};
+
+// Re-export PAGE_SIZE from pmm (it's the standard 4KB page size)
+pub use pmm::PAGE_SIZE;

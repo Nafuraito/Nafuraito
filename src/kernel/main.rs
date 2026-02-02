@@ -175,6 +175,18 @@ mod memory {
         pub fn pmm_total_memory() -> u64;
         pub fn pmm_free_frame_count() -> u64;
         pub fn pmm_is_initialized() -> i32;
+
+        // Paging functions
+        pub fn paging_check_la57_support() -> u8;
+        pub fn paging_check_nx_support() -> u8;
+        pub fn paging_is_la57_enabled() -> u8;
+        pub fn paging_read_cr3() -> u64;
+        pub fn paging_init_c(root_table_phys: u64) -> i32;
+        pub fn paging_get_mode() -> i32;
+        pub fn paging_map_page(virt_addr: u64, phys_addr: u64, flags: u64) -> i32;
+        pub fn paging_unmap_page(virt_addr: u64) -> i32;
+        pub fn paging_translate_address(virt_addr: u64) -> u64;
+        pub fn paging_is_mapped(virt_addr: u64) -> u8;
     }
 }
 
@@ -368,6 +380,57 @@ pub extern "C" fn enter(
         print_hex_u64(memory::memory_get_highest_address());
         video::print("\n\0");
 
+        // Initialize Paging subsystem
+        video::print("Initializing Paging...\n\0");
+        let cr3 = memory::paging_read_cr3();
+        video::print("  Current CR3: \0");
+        print_hex_u64(cr3);
+        video::print("\n\0");
+        
+        let paging_result = memory::paging_init_c(cr3);
+        if paging_result == 0 {
+            video::print("  Paging init: OK\n\0");
+            
+            // Check paging mode
+            let mode = memory::paging_get_mode();
+            video::print("  Mode: \0");
+            if mode == 1 {
+                video::print("5-level (LA57)\0");
+            } else if mode == 0 {
+                video::print("4-level (LA48)\0");
+            } else {
+                video::print("Unknown\0");
+            }
+            video::print("\n\0");
+            
+            // Check CPU features
+            let la57_supported = memory::paging_check_la57_support();
+            let la57_enabled = memory::paging_is_la57_enabled();
+            let nx_supported = memory::paging_check_nx_support();
+            
+            video::print("  LA57 support: \0");
+            if la57_supported != 0 {
+                video::print("Yes\0");
+            } else {
+                video::print("No\0");
+            }
+            video::print("\n  LA57 enabled: \0");
+            if la57_enabled != 0 {
+                video::print("Yes\0");
+            } else {
+                video::print("No\0");
+            }
+            video::print("\n  NX support:   \0");
+            if nx_supported != 0 {
+                video::print("Yes\0");
+            } else {
+                video::print("No\0");
+            }
+            video::print("\n\0");
+        } else {
+            video::print("  Paging init: FAILED\n\0");
+        }
+
         // Initialize Physical Memory Manager (bitmap allocator)
         video::print("Initializing PMM...\n\0");
         video::print("  Memory map addr: \0");
@@ -388,6 +451,100 @@ pub extern "C" fn enter(
             video::print("FAILED (error=\0");
             print_hex_u64((-pmm_result) as u64);
             video::print(")\n\0");
+        }
+
+        // Test page mapping functionality (after PMM is initialized!)
+        serial_print("About to test page mapping...\n");
+        video::print("\nTesting Page Mapping...\n\0");
+        
+        // Allocate a physical frame for testing
+        serial_print("Allocating test frame...\n");
+        let test_phys = memory::pmm_alloc_frame();
+        serial_print("Allocated frame: ");
+        serial_print_hex_u64(test_phys);
+        serial_print("\n");
+        
+        if test_phys != 0 {
+            video::print("  Allocated test frame: \0");
+            print_hex_u64(test_phys);
+            video::print("\n\0");
+            serial_print("About to map page...\n");
+            
+            // Map it to a virtual address (we'll use high address to avoid conflicts)
+            let test_virt = 0xFFFF_8000_0000_0000u64; // Kernel space
+            serial_print("Mapping virt ");
+            serial_print_hex_u64(test_virt);
+            serial_print(" to phys ");
+            serial_print_hex_u64(test_phys);
+            serial_print("\n");
+            
+            serial_print("Calling paging_map_page...\n");
+            
+            // First test a simple function to verify calling works
+            {
+                extern "C" {
+                    fn paging_test_simple(a: u64, b: u64) -> u64;
+                }
+                serial_print("Testing simple C call: ");
+                let result = paging_test_simple(10, 20);
+                serial_print_hex_u64(result);
+                serial_print("\\n");
+            }
+            
+            // Try calling extern directly instead of through module
+            let map_result = {
+                extern "C" {
+                    fn paging_map_page(virt_addr: u64, phys_addr: u64, flags: u64) -> i32;
+                }
+                paging_map_page(test_virt, test_phys, 0x3)
+            };
+            
+            serial_print("Map result: ");
+            serial_print_hex_u64(map_result as u64);
+            serial_print("\n");
+            
+            if map_result == 0 {
+                video::print("  Mapped virt \0");
+                print_hex_u64(test_virt);
+                video::print(" -> phys \0");
+                print_hex_u64(test_phys);
+                video::print("\n\0");
+                
+                // Verify translation
+                let translated = memory::paging_translate_address(test_virt);
+                video::print("  Translation check: \0");
+                if translated == test_phys {
+                    video::print("OK\0");
+                } else {
+                    video::print("FAILED (got \0");
+                    print_hex_u64(translated);
+                    video::print(")\0");
+                }
+                video::print("\n\0");
+                
+                // Unmap the page
+                let unmap_result = memory::paging_unmap_page(test_virt);
+                if unmap_result == 0 {
+                    video::print("  Unmapped successfully\n\0");
+                    
+                    // Verify it's unmapped
+                    let is_mapped = memory::paging_is_mapped(test_virt);
+                    if is_mapped == 0 {
+                        video::print("  Unmap verification: OK\n\0");
+                    } else {
+                        video::print("  Unmap verification: FAILED\n\0");
+                    }
+                } else {
+                    video::print("  Unmap FAILED\n\0");
+                }
+            } else {
+                video::print("  Map FAILED\n\0");
+            }
+            
+            // Free the test frame
+            memory::pmm_free_frame(test_phys);
+        } else {
+            video::print("  Could not allocate test frame\n\0");
         }
 
         // Initialize PCI
