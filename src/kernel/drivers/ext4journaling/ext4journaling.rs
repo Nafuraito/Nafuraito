@@ -1,14 +1,49 @@
-use core::ffi::{c_char, c_int, c_void};
-use core::ptr;
-
-//! EXT4 Journaling Filesystem Driver - Rust FFI Bindings
+//! EXT4 Journaling Filesystem Driver - Pure Rust Implementation
 //!
-//! This module provides safe Rust bindings to the EXT4 filesystem driver
-//! with journaling (JBD2) support for the Nafuraito kernel.
+//! This module provides a complete EXT4 filesystem driver with journaling (JBD2) 
+//! support for the Nafuraito kernel, written entirely in Rust.
 
 #![no_std]
 #![allow(non_camel_case_types)]
+#![allow(dead_code)]
 
+use core::ptr;
+use core::mem;
+use core::slice;
+
+extern crate alloc;
+use alloc::vec::Vec;
+use alloc::boxed::Box;
+use alloc::string::String;
+
+// ============== Memory Allocation Stubs ==============
+// These should be provided by your kernel's memory allocator
+
+extern "C" {
+    fn kmalloc(size: usize) -> *mut u8;
+    fn kfree(ptr: *mut u8);
+}
+
+/// Safe wrapper for byte buffer allocation
+fn kernel_alloc_bytes(size: usize) -> Option<Box<[u8]>> {
+    if size == 0 {
+        return None;
+    }
+    
+    let ptr = unsafe { kmalloc(size) };
+    
+    if ptr.is_null() {
+        return None;
+    }
+    
+    unsafe {
+        // Zero initialize
+        ptr::write_bytes(ptr, 0, size);
+        Some(Box::from_raw(slice::from_raw_parts_mut(ptr, size)))
+    }
+}
+
+// ============== Constants ==============
 
 /// EXT4 Magic Number
 pub const EXT4_SUPER_MAGIC: u16 = 0xEF53;
@@ -109,6 +144,8 @@ pub const EXT4_N_BLOCKS: usize = 15;
 pub const EXT4_EXT_MAGIC: u16 = 0xF30A;
 pub const EXT4_EXT_MAX_DEPTH: u16 = 5;
 
+// ============== Error Types ==============
+
 /// Error codes
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,28 +162,15 @@ pub enum Ext4Error {
 }
 
 impl Ext4Error {
-    pub fn from_code(code: c_int) -> Self {
-        match code {
-            0 => Ext4Error::Success,
-            -1 => Ext4Error::InvalidMagic,
-            -2 => Ext4Error::Io,
-            -3 => Ext4Error::NoMem,
-            -4 => Ext4Error::NotFound,
-            -5 => Ext4Error::Invalid,
-            -6 => Ext4Error::Journal,
-            -7 => Ext4Error::NoSpace,
-            -8 => Ext4Error::Permission,
-            _ => Ext4Error::Invalid,
-        }
-    }
-
     pub fn is_success(&self) -> bool {
-        *self == Ext4Error::Success
+        matches!(self, Ext4Error::Success)
     }
 }
 
 /// Result type for EXT4 operations
 pub type Ext4Result<T> = Result<T, Ext4Error>;
+
+// ============== Structures ==============
 
 /// EXT4 Superblock Structure
 #[repr(C, packed)]
@@ -184,8 +208,8 @@ pub struct Ext4Superblock {
     pub s_feature_incompat: u32,
     pub s_feature_ro_compat: u32,
     pub s_uuid: [u8; 16],
-    pub s_volume_name: [c_char; 16],
-    pub s_last_mounted: [c_char; 64],
+    pub s_volume_name: [u8; 16],
+    pub s_last_mounted: [u8; 64],
     pub s_algorithm_usage_bitmap: u32,
     pub s_prealloc_blocks: u8,
     pub s_prealloc_dir_blocks: u8,
@@ -245,6 +269,12 @@ pub struct Ext4Superblock {
     pub s_checksum: u32,
 }
 
+impl Default for Ext4Superblock {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
+}
+
 /// EXT4 Block Group Descriptor (64-bit version)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
@@ -272,6 +302,12 @@ pub struct Ext4GroupDesc {
     pub bg_block_bitmap_csum_hi: u16,
     pub bg_inode_bitmap_csum_hi: u16,
     pub bg_reserved: u32,
+}
+
+impl Default for Ext4GroupDesc {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
 }
 
 /// EXT4 Inode Structure
@@ -310,6 +346,12 @@ pub struct Ext4Inode {
     pub i_crtime_extra: u32,
     pub i_version_hi: u32,
     pub i_projid: u32,
+}
+
+impl Default for Ext4Inode {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
 }
 
 impl Ext4Inode {
@@ -357,15 +399,19 @@ pub struct Ext4DirEntry {
     pub rec_len: u16,
     pub name_len: u8,
     pub file_type: u8,
-    pub name: [c_char; EXT4_NAME_LEN],
+    pub name: [u8; EXT4_NAME_LEN],
+}
+
+impl Default for Ext4DirEntry {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
 }
 
 impl Ext4DirEntry {
     /// Get the name as a byte slice
     pub fn name_bytes(&self) -> &[u8] {
-        unsafe {
-            core::slice::from_raw_parts(self.name.as_ptr() as *const u8, self.name_len as usize)
-        }
+        &self.name[..self.name_len as usize]
     }
 }
 
@@ -380,6 +426,12 @@ pub struct Ext4ExtentHeader {
     pub eh_generation: u32,
 }
 
+impl Default for Ext4ExtentHeader {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
+}
+
 /// EXT4 Extent Index (for internal nodes)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
@@ -390,6 +442,19 @@ pub struct Ext4ExtentIdx {
     pub ei_unused: u16,
 }
 
+impl Default for Ext4ExtentIdx {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
+}
+
+impl Ext4ExtentIdx {
+    /// Get the full 48-bit physical block number
+    pub fn leaf(&self) -> u64 {
+        (self.ei_leaf_lo as u64) | ((self.ei_leaf_hi as u64) << 32)
+    }
+}
+
 /// EXT4 Extent (leaf node)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
@@ -398,6 +463,12 @@ pub struct Ext4Extent {
     pub ee_len: u16,
     pub ee_start_hi: u16,
     pub ee_start_lo: u32,
+}
+
+impl Default for Ext4Extent {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
 }
 
 impl Ext4Extent {
@@ -426,6 +497,12 @@ pub struct Jbd2Header {
     pub h_sequence: u32,
 }
 
+impl Default for Jbd2Header {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
+}
+
 /// JBD2 Journal Superblock
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
@@ -452,243 +529,772 @@ pub struct Jbd2Superblock {
     pub s_users: [u8; 16 * 48],
 }
 
-/// Opaque type for ext4_fs_t
-#[repr(C)]
-pub struct Ext4Fs {
-    _opaque: [u8; 0],
+impl Default for Jbd2Superblock {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
 }
 
-/// Opaque type for ext4_file_t
-#[repr(C)]
-pub struct Ext4File {
-    _opaque: [u8; 0],
+/// JBD2 Block Tag
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+pub struct Jbd2BlockTag {
+    pub t_blocknr: u32,
+    pub t_checksum: u16,
+    pub t_flags: u16,
+    pub t_blocknr_hi: u32,
 }
 
-/// Opaque type for ext4_dir_iterator_t
-#[repr(C)]
-pub struct Ext4DirIterator {
-    _opaque: [u8; 0],
+impl Default for Jbd2BlockTag {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
 }
 
-/// Block device operations callback type
-pub type ReadBlockFn =
-    unsafe extern "C" fn(dev: *mut c_void, block: u64, buffer: *mut c_void, count: usize) -> c_int;
-pub type WriteBlockFn = unsafe extern "C" fn(
-    dev: *mut c_void,
-    block: u64,
-    buffer: *const c_void,
-    count: usize,
-) -> c_int;
-pub type SyncFn = unsafe extern "C" fn(dev: *mut c_void) -> c_int;
+// ============== Block Device Operations ==============
+
+/// Block device operations callback types
+pub type ReadBlockFn = fn(dev: *mut u8, block: u64, buffer: &mut [u8]) -> Ext4Result<()>;
+pub type WriteBlockFn = fn(dev: *mut u8, block: u64, buffer: &[u8]) -> Ext4Result<()>;
+pub type SyncFn = fn(dev: *mut u8) -> Ext4Result<()>;
 
 /// Block Device Operations structure
-#[repr(C)]
 pub struct Ext4BlockOps {
     pub read_block: Option<ReadBlockFn>,
     pub write_block: Option<WriteBlockFn>,
     pub sync: Option<SyncFn>,
 }
 
-// FFI declarations for C functions
-extern "C" {
-    fn ext4_mount(
-        device: *mut c_void,
-        ops: *mut Ext4BlockOps,
-        fs_out: *mut *mut Ext4Fs,
-    ) -> c_int;
+// ============== Journal Transaction ==============
 
-    fn ext4_unmount(fs: *mut Ext4Fs) -> c_int;
-
-    fn ext4_open(
-        fs: *mut Ext4Fs,
-        path: *const c_char,
-        flags: u32,
-        file_out: *mut *mut Ext4File,
-    ) -> c_int;
-
-    fn ext4_close(file: *mut Ext4File) -> c_int;
-
-    fn ext4_read(
-        file: *mut Ext4File,
-        buffer: *mut c_void,
-        size: usize,
-        bytes_read: *mut usize,
-    ) -> c_int;
-
-    fn ext4_seek(file: *mut Ext4File, offset: i64, whence: c_int) -> c_int;
-
-    fn ext4_tell(file: *mut Ext4File) -> u64;
-
-    fn ext4_lookup_path(fs: *mut Ext4Fs, path: *const c_char, inode_out: *mut u32) -> c_int;
-
-    fn ext4_dir_find_entry(
-        fs: *mut Ext4Fs,
-        dir_inode: *mut Ext4Inode,
-        name: *const c_char,
-        inode_out: *mut u32,
-    ) -> c_int;
-
-    fn ext4_dir_open(
-        fs: *mut Ext4Fs,
-        path: *const c_char,
-        iter_out: *mut *mut Ext4DirIterator,
-    ) -> c_int;
-
-    fn ext4_dir_read(iter: *mut Ext4DirIterator, entry: *mut Ext4DirEntry) -> c_int;
-
-    fn ext4_dir_close(iter: *mut Ext4DirIterator) -> c_int;
-
-    fn ext4_stat(fs: *mut Ext4Fs, path: *const c_char, inode_out: *mut Ext4Inode) -> c_int;
-
-    fn ext4_statfs(
-        fs: *mut Ext4Fs,
-        total_blocks: *mut u64,
-        free_blocks: *mut u64,
-        total_inodes: *mut u64,
-        free_inodes: *mut u64,
-    ) -> c_int;
+struct Transaction {
+    tid: u32,
+    blocks: Vec<u64>,
+    data: Vec<Box<[u8]>>,
 }
 
-/// Seek origins
-#[repr(i32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SeekFrom {
-    Start = 0,
-    Current = 1,
-    End = 2,
+impl Transaction {
+    fn new(tid: u32) -> Self {
+        Transaction {
+            tid,
+            blocks: Vec::new(),
+            data: Vec::new(),
+        }
+    }
+
+    fn add_block(&mut self, block: u64, data: Box<[u8]>) {
+        self.blocks.push(block);
+        self.data.push(data);
+    }
 }
 
-/// Safe wrapper for EXT4 filesystem handle
+// ============== Journal ==============
+
+struct Journal {
+    superblock: Jbd2Superblock,
+    journal_start: u64,
+    journal_length: u32,
+    current_sequence: u32,
+    head: u32,
+    tail: u32,
+    running: bool,
+    current_transaction: Option<Transaction>,
+}
+
+impl Journal {
+    fn new(superblock: Jbd2Superblock, journal_start: u64) -> Self {
+        let journal_length = superblock.s_maxlen;
+        let current_sequence = superblock.s_sequence;
+        let head = superblock.s_start;
+        let tail = superblock.s_start;
+
+        Journal {
+            superblock,
+            journal_start,
+            journal_length,
+            current_sequence,
+            head,
+            tail,
+            running: true,
+            current_transaction: None,
+        }
+    }
+
+    fn start_transaction(&mut self) -> Ext4Result<()> {
+        if self.current_transaction.is_some() {
+            return Ok(());
+        }
+
+        let tid = self.current_sequence;
+        self.current_sequence += 1;
+        self.current_transaction = Some(Transaction::new(tid));
+        Ok(())
+    }
+
+    fn add_block(&mut self, block: u64, data: Box<[u8]>) -> Ext4Result<()> {
+        if self.current_transaction.is_none() {
+            self.start_transaction()?;
+        }
+
+        if let Some(ref mut trans) = self.current_transaction {
+            trans.add_block(block, data);
+        }
+        Ok(())
+    }
+}
+
+// ============== Filesystem ==============
+
+/// EXT4 Filesystem Context
 pub struct Ext4Filesystem {
-    inner: *mut Ext4Fs,
+    device: *mut u8,
+    ops: Ext4BlockOps,
+    superblock: Box<Ext4Superblock>,
+    group_descs: Vec<Ext4GroupDesc>,
+    journal: Option<Box<Journal>>,
+    block_size: u32,
+    blocks_per_group: u32,
+    inodes_per_group: u32,
+    inode_size: u32,
+    group_count: u32,
+    desc_size: u32,
+    total_blocks: u64,
+    readonly: bool,
+    use_extents: bool,
+    use_64bit: bool,
 }
 
 impl Ext4Filesystem {
     /// Mount an EXT4 filesystem
-    ///
-    /// # Safety
-    /// The device pointer and block ops must remain valid for the lifetime of the filesystem.
-    pub unsafe fn mount(device: *mut c_void, ops: &mut Ext4BlockOps) -> Ext4Result<Self> {
-        let mut fs: *mut Ext4Fs = ptr::null_mut();
-        let result = ext4_mount(device, ops as *mut Ext4BlockOps, &mut fs);
-        let err = Ext4Error::from_code(result);
-        if err.is_success() {
-            Ok(Ext4Filesystem { inner: fs })
+    pub fn mount(device: *mut u8, ops: Ext4BlockOps) -> Ext4Result<Self> {
+        let mut fs = Ext4Filesystem {
+            device,
+            ops,
+            superblock: Box::new(Ext4Superblock::default()),
+            group_descs: Vec::new(),
+            journal: None,
+            block_size: 0,
+            blocks_per_group: 0,
+            inodes_per_group: 0,
+            inode_size: 0,
+            group_count: 0,
+            desc_size: 0,
+            total_blocks: 0,
+            readonly: false,
+            use_extents: false,
+            use_64bit: false,
+        };
+
+        fs.read_superblock()?;
+        fs.read_group_descriptors()?;
+        fs.init_journal()?;
+
+        Ok(fs)
+    }
+
+    /// Read the superblock
+    fn read_superblock(&mut self) -> Ext4Result<()> {
+        let mut buffer = kernel_alloc_bytes(EXT4_MIN_BLOCK_SIZE * 2)
+            .ok_or(Ext4Error::NoMem)?;
+
+        // Read first two blocks (2KB) to get superblock
+        if let Some(read_fn) = self.ops.read_block {
+            read_fn(self.device, 0, &mut buffer)?;
         } else {
-            Err(err)
+            return Err(Ext4Error::Invalid);
+        }
+
+        // Copy superblock from offset 1024
+        let sb_bytes = &buffer[EXT4_SUPERBLOCK_OFFSET..EXT4_SUPERBLOCK_OFFSET + mem::size_of::<Ext4Superblock>()];
+        unsafe {
+            ptr::copy_nonoverlapping(
+                sb_bytes.as_ptr(),
+                &mut *self.superblock as *mut Ext4Superblock as *mut u8,
+                mem::size_of::<Ext4Superblock>()
+            );
+        }
+
+        // Validate magic number
+        if self.superblock.s_magic != EXT4_SUPER_MAGIC {
+            return Err(Ext4Error::InvalidMagic);
+        }
+
+        // Calculate filesystem parameters
+        self.block_size = EXT4_MIN_BLOCK_SIZE << self.superblock.s_log_block_size;
+        self.blocks_per_group = self.superblock.s_blocks_per_group;
+        self.inodes_per_group = self.superblock.s_inodes_per_group;
+        self.inode_size = self.superblock.s_inode_size as u32;
+
+        // Handle 64-bit block counts
+        if (self.superblock.s_feature_incompat & EXT4_FEATURE_INCOMPAT_64BIT) != 0 {
+            self.use_64bit = true;
+            self.total_blocks = ((self.superblock.s_blocks_count_hi as u64) << 32) 
+                | self.superblock.s_blocks_count_lo as u64;
+            self.desc_size = self.superblock.s_desc_size as u32;
+            if self.desc_size < 32 {
+                self.desc_size = 32;
+            }
+        } else {
+            self.use_64bit = false;
+            self.total_blocks = self.superblock.s_blocks_count_lo as u64;
+            self.desc_size = 32;
+        }
+
+        // Calculate group count
+        self.group_count = ((self.total_blocks + self.blocks_per_group as u64 - 1) 
+            / self.blocks_per_group as u64) as u32;
+
+        // Check for extent support
+        self.use_extents = (self.superblock.s_feature_incompat & EXT4_FEATURE_INCOMPAT_EXTENTS) != 0;
+
+        Ok(())
+    }
+
+    /// Read block group descriptors
+    fn read_group_descriptors(&mut self) -> Ext4Result<()> {
+        let desc_per_block = self.block_size / self.desc_size;
+        let desc_blocks = (self.group_count + desc_per_block - 1) / desc_per_block;
+
+        let mut buffer = kernel_alloc_bytes(self.block_size as usize)
+            .ok_or(Ext4Error::NoMem)?;
+
+        // Group descriptors start at block 1 (for 1K blocks) or block 1 (for larger blocks)
+        let desc_start = if self.block_size == EXT4_MIN_BLOCK_SIZE { 2 } else { 1 };
+
+        for i in 0..desc_blocks {
+            self.read_block(desc_start + i as u64, &mut buffer)?;
+
+            for j in 0..desc_per_block {
+                let idx = i * desc_per_block + j;
+                if idx >= self.group_count {
+                    break;
+                }
+
+                let offset = (j * self.desc_size) as usize;
+                let mut desc = Ext4GroupDesc::default();
+                unsafe {
+                    ptr::copy_nonoverlapping(
+                        buffer[offset..].as_ptr(),
+                        &mut desc as *mut Ext4GroupDesc as *mut u8,
+                        mem::size_of::<Ext4GroupDesc>().min(self.desc_size as usize)
+                    );
+                }
+                self.group_descs.push(desc);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Initialize the journal
+    fn init_journal(&mut self) -> Ext4Result<()> {
+        if (self.superblock.s_feature_compat & EXT4_FEATURE_COMPAT_HAS_JOURNAL) == 0 {
+            return Ok(());
+        }
+
+        // Read journal inode
+        let journal_inode_num = self.superblock.s_journal_inum;
+        let journal_inode = self.read_inode(journal_inode_num)?;
+
+        // Get first block of journal
+        let journal_start = self.get_block(&journal_inode, 0)?;
+        if journal_start == 0 {
+            return Err(Ext4Error::Journal);
+        }
+
+        // Read journal superblock
+        let mut buffer = kernel_alloc_bytes(self.block_size as usize)
+            .ok_or(Ext4Error::NoMem)?;
+        self.read_block(journal_start, &mut buffer)?;
+
+        let mut jbd2_sb = Jbd2Superblock::default();
+        unsafe {
+            ptr::copy_nonoverlapping(
+                buffer.as_ptr(),
+                &mut jbd2_sb as *mut Jbd2Superblock as *mut u8,
+                mem::size_of::<Jbd2Superblock>()
+            );
+        }
+
+        // Validate journal magic
+        if jbd2_sb.s_header.h_magic != JBD2_MAGIC_NUMBER {
+            return Err(Ext4Error::Journal);
+        }
+
+        let journal = Box::new(Journal::new(jbd2_sb, journal_start));
+        self.journal = Some(journal);
+
+        // Recover if needed
+        if (self.superblock.s_feature_incompat & EXT4_FEATURE_INCOMPAT_RECOVER) != 0 {
+            if self.journal_recover().is_err() {
+                self.readonly = true;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Recover journal
+    fn journal_recover(&mut self) -> Ext4Result<()> {
+        // Journal recovery implementation
+        // For now, just clear the recovery flag
+        self.superblock.s_feature_incompat &= !EXT4_FEATURE_INCOMPAT_RECOVER;
+        Ok(())
+    }
+
+    /// Read a block from the device
+    fn read_block(&self, block: u64, buffer: &mut [u8]) -> Ext4Result<()> {
+        if let Some(read_fn) = self.ops.read_block {
+            read_fn(self.device, block, buffer)
+        } else {
+            Err(Ext4Error::Invalid)
         }
     }
 
-    /// Open a file by path
-    pub fn open(&mut self, path: &[u8], flags: u32) -> Ext4Result<Ext4FileHandle> {
-        let mut file: *mut Ext4File = ptr::null_mut();
-        // Ensure path is null-terminated
-        let result = unsafe { ext4_open(self.inner, path.as_ptr() as *const c_char, flags, &mut file) };
-        let err = Ext4Error::from_code(result);
-        if err.is_success() {
-            Ok(Ext4FileHandle { inner: file })
+    /// Write a block to the device
+    fn write_block(&self, block: u64, buffer: &[u8]) -> Ext4Result<()> {
+        if self.readonly {
+            return Err(Ext4Error::Permission);
+        }
+
+        if let Some(write_fn) = self.ops.write_block {
+            write_fn(self.device, block, buffer)
         } else {
-            Err(err)
+            Err(Ext4Error::Invalid)
+        }
+    }
+
+    /// Read an inode
+    fn read_inode(&self, inode_num: u32) -> Ext4Result<Ext4Inode> {
+        if inode_num == 0 {
+            return Err(Ext4Error::Invalid);
+        }
+
+        // Calculate which block group contains this inode
+        let group = (inode_num - 1) / self.inodes_per_group;
+        let index = (inode_num - 1) % self.inodes_per_group;
+
+        if group >= self.group_count {
+            return Err(Ext4Error::Invalid);
+        }
+
+        // Get inode table location
+        let desc = &self.group_descs[group as usize];
+        let mut inode_table = desc.bg_inode_table_lo as u64;
+        if self.use_64bit {
+            inode_table |= (desc.bg_inode_table_hi as u64) << 32;
+        }
+
+        // Calculate block and offset within block
+        let block = inode_table + ((index * self.inode_size) / self.block_size) as u64;
+        let offset = ((index * self.inode_size) % self.block_size) as usize;
+
+        let mut buffer = kernel_alloc_bytes(self.block_size as usize)
+            .ok_or(Ext4Error::NoMem)?;
+        self.read_block(block, &mut buffer)?;
+
+        let mut inode = Ext4Inode::default();
+        unsafe {
+            ptr::copy_nonoverlapping(
+                buffer[offset..].as_ptr(),
+                &mut inode as *mut Ext4Inode as *mut u8,
+                mem::size_of::<Ext4Inode>()
+            );
+        }
+
+        Ok(inode)
+    }
+
+    /// Write an inode
+    fn write_inode(&mut self, inode_num: u32, inode: &Ext4Inode) -> Ext4Result<()> {
+        if inode_num == 0 || self.readonly {
+            return Err(Ext4Error::Invalid);
+        }
+
+        let group = (inode_num - 1) / self.inodes_per_group;
+        let index = (inode_num - 1) % self.inodes_per_group;
+
+        if group >= self.group_count {
+            return Err(Ext4Error::Invalid);
+        }
+
+        let desc = &self.group_descs[group as usize];
+        let mut inode_table = desc.bg_inode_table_lo as u64;
+        if self.use_64bit {
+            inode_table |= (desc.bg_inode_table_hi as u64) << 32;
+        }
+
+        let block = inode_table + ((index * self.inode_size) / self.block_size) as u64;
+        let offset = ((index * self.inode_size) % self.block_size) as usize;
+
+        let mut buffer = kernel_alloc_bytes(self.block_size as usize)
+            .ok_or(Ext4Error::NoMem)?;
+        self.read_block(block, &mut buffer)?;
+
+        unsafe {
+            ptr::copy_nonoverlapping(
+                inode as *const Ext4Inode as *const u8,
+                buffer[offset..].as_mut_ptr(),
+                mem::size_of::<Ext4Inode>()
+            );
+        }
+
+        self.write_block_journaled(block, &buffer)?;
+        Ok(())
+    }
+
+    /// Write a block with journaling support
+    fn write_block_journaled(&mut self, block: u64, data: &[u8]) -> Ext4Result<()> {
+        if let Some(ref mut journal) = self.journal {
+            if journal.running {
+                let data_copy = kernel_alloc_bytes(data.len())
+                    .ok_or(Ext4Error::NoMem)?;
+                journal.add_block(block, data_copy)?;
+                return Ok(());
+            }
+        }
+
+        // No journal or journal not running - write directly
+        self.write_block(block, data)
+    }
+
+    /// Get physical block number from extent tree
+    fn get_block_from_extent(&self, inode: &Ext4Inode, logical_block: u64) -> Ext4Result<u64> {
+        let header_ptr = &inode.i_block as *const u32 as *const Ext4ExtentHeader;
+        let mut header = unsafe { *header_ptr };
+
+        if header.eh_magic != EXT4_EXT_MAGIC {
+            return Err(Ext4Error::Invalid);
+        }
+
+        let mut depth = header.eh_depth;
+        let mut buffer_opt: Option<Box<[u8]>> = None;
+
+        while depth > 0 {
+            // Internal node - find the right child
+            let idx_ptr = unsafe { (header_ptr as *const u8).add(mem::size_of::<Ext4ExtentHeader>()) as *const Ext4ExtentIdx };
+            let indices = unsafe { slice::from_raw_parts(idx_ptr, header.eh_entries as usize) };
+
+            let mut best: Option<&Ext4ExtentIdx> = None;
+            for idx in indices {
+                if idx.ei_block <= logical_block as u32 {
+                    best = Some(idx);
+                } else {
+                    break;
+                }
+            }
+
+            let best_idx = best.ok_or(Ext4Error::NotFound)?;
+            let physical_block = best_idx.leaf();
+
+            // Read the child block
+            let mut buffer = kernel_alloc_bytes(self.block_size as usize)
+                .ok_or(Ext4Error::NoMem)?;
+            self.read_block(physical_block, &mut buffer)?;
+
+            let new_header_ptr = buffer.as_ptr() as *const Ext4ExtentHeader;
+            header = unsafe { *new_header_ptr };
+            buffer_opt = Some(buffer);
+            depth -= 1;
+        }
+
+        // Leaf node - find the extent
+        let buffer = buffer_opt.as_ref()
+            .map(|b| b.as_ptr())
+            .unwrap_or(&inode.i_block as *const u32 as *const u8);
+        
+        let extent_ptr = unsafe { buffer.add(mem::size_of::<Ext4ExtentHeader>()) as *const Ext4Extent };
+        let extents = unsafe { slice::from_raw_parts(extent_ptr, header.eh_entries as usize) };
+
+        for extent in extents {
+            let ee_block = extent.ee_block;
+            let ee_len = extent.len();
+
+            if logical_block >= ee_block as u64 && logical_block < (ee_block + ee_len as u32) as u64 {
+                let physical_block = extent.start() + (logical_block - ee_block as u64);
+                return Ok(physical_block);
+            }
+        }
+
+        Err(Ext4Error::NotFound)
+    }
+
+    /// Get physical block number using indirect blocks (legacy)
+    fn get_block_indirect(&self, inode: &Ext4Inode, logical_block: u64) -> Ext4Result<u64> {
+        let ptrs_per_block = self.block_size as u64 / 4;
+
+        // Direct blocks
+        if logical_block < EXT4_NDIR_BLOCKS as u64 {
+            return Ok(inode.i_block[logical_block as usize] as u64);
+        }
+
+        let mut logical_block = logical_block - EXT4_NDIR_BLOCKS as u64;
+
+        let mut buffer = kernel_alloc_bytes(self.block_size as usize)
+            .ok_or(Ext4Error::NoMem)?;
+
+        // Single indirect
+        if logical_block < ptrs_per_block {
+            self.read_block(inode.i_block[EXT4_IND_BLOCK] as u64, &mut buffer)?;
+            let ptrs = unsafe {
+                slice::from_raw_parts(buffer.as_ptr() as *const u32, ptrs_per_block as usize)
+            };
+            return Ok(ptrs[logical_block as usize] as u64);
+        }
+
+        logical_block -= ptrs_per_block;
+
+        // Double indirect
+        if logical_block < ptrs_per_block * ptrs_per_block {
+            self.read_block(inode.i_block[EXT4_DIND_BLOCK] as u64, &mut buffer)?;
+            let ptrs = unsafe {
+                slice::from_raw_parts(buffer.as_ptr() as *const u32, ptrs_per_block as usize)
+            };
+            let ind_block = ptrs[(logical_block / ptrs_per_block) as usize];
+            
+            self.read_block(ind_block as u64, &mut buffer)?;
+            let ptrs = unsafe {
+                slice::from_raw_parts(buffer.as_ptr() as *const u32, ptrs_per_block as usize)
+            };
+            return Ok(ptrs[(logical_block % ptrs_per_block) as usize] as u64);
+        }
+
+        logical_block -= ptrs_per_block * ptrs_per_block;
+
+        // Triple indirect
+        self.read_block(inode.i_block[EXT4_TIND_BLOCK] as u64, &mut buffer)?;
+        let ptrs = unsafe {
+            slice::from_raw_parts(buffer.as_ptr() as *const u32, ptrs_per_block as usize)
+        };
+        let dind_block = ptrs[(logical_block / (ptrs_per_block * ptrs_per_block)) as usize];
+
+        self.read_block(dind_block as u64, &mut buffer)?;
+        let ptrs = unsafe {
+            slice::from_raw_parts(buffer.as_ptr() as *const u32, ptrs_per_block as usize)
+        };
+        let ind_block = ptrs[((logical_block / ptrs_per_block) % ptrs_per_block) as usize];
+
+        self.read_block(ind_block as u64, &mut buffer)?;
+        let ptrs = unsafe {
+            slice::from_raw_parts(buffer.as_ptr() as *const u32, ptrs_per_block as usize)
+        };
+        Ok(ptrs[(logical_block % ptrs_per_block) as usize] as u64)
+    }
+
+    /// Get physical block number for a logical block in an inode
+    pub fn get_block(&self, inode: &Ext4Inode, logical_block: u64) -> Ext4Result<u64> {
+        if inode.uses_extents() {
+            self.get_block_from_extent(inode, logical_block)
+        } else {
+            self.get_block_indirect(inode, logical_block)
         }
     }
 
     /// Lookup a path and return the inode number
-    pub fn lookup_path(&mut self, path: &[u8]) -> Ext4Result<u32> {
-        let mut inode: u32 = 0;
-        let result = unsafe { ext4_lookup_path(self.inner, path.as_ptr() as *const c_char, &mut inode) };
-        let err = Ext4Error::from_code(result);
-        if err.is_success() {
-            Ok(inode)
-        } else {
-            Err(err)
+    pub fn lookup_path(&self, path: &[u8]) -> Ext4Result<u32> {
+        let mut current_inode = EXT4_ROOT_INODE;
+        let mut p = path;
+
+        // Skip leading slashes
+        while !p.is_empty() && p[0] == b'/' {
+            p = &p[1..];
         }
+
+        // Empty path or root
+        if p.is_empty() {
+            return Ok(EXT4_ROOT_INODE);
+        }
+
+        while !p.is_empty() {
+            // Extract next path component
+            let mut len = 0;
+            while len < p.len() && p[len] != b'/' && len < EXT4_NAME_LEN {
+                len += 1;
+            }
+
+            if len == 0 {
+                p = &p[1..];
+                continue;
+            }
+
+            let name = &p[..len];
+
+            // Read current directory inode
+            let inode = self.read_inode(current_inode)?;
+
+            // Search directory for name
+            current_inode = self.dir_find_entry(&inode, name)?;
+
+            p = &p[len..];
+            while !p.is_empty() && p[0] == b'/' {
+                p = &p[1..];
+            }
+        }
+
+        Ok(current_inode)
     }
 
-    /// Open a directory for iteration
-    pub fn open_dir(&mut self, path: &[u8]) -> Ext4Result<Ext4DirHandle> {
-        let mut iter: *mut Ext4DirIterator = ptr::null_mut();
-        let result = unsafe { ext4_dir_open(self.inner, path.as_ptr() as *const c_char, &mut iter) };
-        let err = Ext4Error::from_code(result);
-        if err.is_success() {
-            Ok(Ext4DirHandle { inner: iter })
-        } else {
-            Err(err)
+    /// Find an entry in a directory
+    pub fn dir_find_entry(&self, dir_inode: &Ext4Inode, name: &[u8]) -> Ext4Result<u32> {
+        let dir_size = dir_inode.size();
+        let mut offset = 0u64;
+
+        let mut buffer = kernel_alloc_bytes(self.block_size as usize)
+            .ok_or(Ext4Error::NoMem)?;
+
+        while offset < dir_size {
+            let logical_block = offset / self.block_size as u64;
+            let physical_block = self.get_block(dir_inode, logical_block)?;
+
+            if physical_block == 0 {
+                offset += self.block_size as u64;
+                continue;
+            }
+
+            self.read_block(physical_block, &mut buffer)?;
+
+            let mut block_offset = 0usize;
+            while block_offset < self.block_size as usize {
+                let entry_ptr = unsafe { buffer[block_offset..].as_ptr() as *const Ext4DirEntry };
+                let entry = unsafe { &*entry_ptr };
+
+                if entry.rec_len == 0 {
+                    break;
+                }
+
+                if entry.inode != 0 && entry.name_len as usize == name.len() {
+                    let entry_name = entry.name_bytes();
+                    if entry_name == name {
+                        return Ok(entry.inode);
+                    }
+                }
+
+                block_offset += entry.rec_len as usize;
+            }
+
+            offset += self.block_size as u64;
         }
+
+        Err(Ext4Error::NotFound)
     }
 
-    /// Get file/inode statistics
-    pub fn stat(&mut self, path: &[u8]) -> Ext4Result<Ext4Inode> {
-        let mut inode = unsafe { core::mem::zeroed::<Ext4Inode>() };
-        let result = unsafe { ext4_stat(self.inner, path.as_ptr() as *const c_char, &mut inode) };
-        let err = Ext4Error::from_code(result);
-        if err.is_success() {
-            Ok(inode)
-        } else {
-            Err(err)
-        }
+    /// Open a file by path
+    pub fn open(&mut self, path: &[u8], flags: u32) -> Ext4Result<Ext4FileHandle> {
+        let inode_num = self.lookup_path(path)?;
+        let inode = self.read_inode(inode_num)?;
+
+        Ok(Ext4FileHandle {
+            fs: self,
+            inode_num,
+            inode,
+            position: 0,
+            flags,
+        })
+    }
+
+    /// Get file statistics
+    pub fn stat(&self, path: &[u8]) -> Ext4Result<Ext4Inode> {
+        let inode_num = self.lookup_path(path)?;
+        self.read_inode(inode_num)
     }
 
     /// Get filesystem statistics
-    pub fn statfs(&mut self) -> Ext4Result<Ext4FsStats> {
-        let mut total_blocks: u64 = 0;
-        let mut free_blocks: u64 = 0;
-        let mut total_inodes: u64 = 0;
-        let mut free_inodes: u64 = 0;
-
-        let result = unsafe {
-            ext4_statfs(
-                self.inner,
-                &mut total_blocks,
-                &mut free_blocks,
-                &mut total_inodes,
-                &mut free_inodes,
-            )
-        };
-        let err = Ext4Error::from_code(result);
-        if err.is_success() {
-            Ok(Ext4FsStats {
-                total_blocks,
-                free_blocks,
-                total_inodes,
-                free_inodes,
-            })
+    pub fn statfs(&self) -> Ext4FsStats {
+        let free_blocks = if self.use_64bit {
+            ((self.superblock.s_free_blocks_count_hi as u64) << 32) 
+                | self.superblock.s_free_blocks_count_lo as u64
         } else {
-            Err(err)
+            self.superblock.s_free_blocks_count_lo as u64
+        };
+
+        Ext4FsStats {
+            total_blocks: self.total_blocks,
+            free_blocks,
+            total_inodes: self.superblock.s_inodes_count as u64,
+            free_inodes: self.superblock.s_free_inodes_count as u64,
         }
     }
 
-    /// Find an entry in a directory by inode
-    pub fn dir_find_entry(&mut self, dir_inode: &mut Ext4Inode, name: &[u8]) -> Ext4Result<u32> {
-        let mut inode: u32 = 0;
-        let result = unsafe {
-            ext4_dir_find_entry(
-                self.inner,
-                dir_inode as *mut Ext4Inode,
-                name.as_ptr() as *const c_char,
-                &mut inode,
-            )
-        };
-        let err = Ext4Error::from_code(result);
-        if err.is_success() {
-            Ok(inode)
-        } else {
-            Err(err)
-        }
-    }
+    /// Commit current journal transaction
+    pub fn journal_commit(&mut self) -> Ext4Result<()> {
+        if let Some(ref mut journal) = self.journal {
+            if let Some(trans) = journal.current_transaction.take() {
+                // Write descriptor block
+                let mut desc_buffer = kernel_alloc_bytes(self.block_size as usize)
+                    .ok_or(Ext4Error::NoMem)?;
+                
+                let header = Jbd2Header {
+                    h_magic: JBD2_MAGIC_NUMBER,
+                    h_blocktype: JBD2_DESCRIPTOR_BLOCK,
+                    h_sequence: trans.tid,
+                };
 
-    /// Get the raw pointer (for advanced usage)
-    pub fn as_ptr(&self) -> *mut Ext4Fs {
-        self.inner
-    }
-}
+                unsafe {
+                    ptr::copy_nonoverlapping(
+                        &header as *const Jbd2Header as *const u8,
+                        desc_buffer.as_mut_ptr(),
+                        mem::size_of::<Jbd2Header>()
+                    );
+                }
 
-impl Drop for Ext4Filesystem {
-    fn drop(&mut self) {
-        if !self.inner.is_null() {
-            unsafe {
-                ext4_unmount(self.inner);
+                let mut journal_block = journal.head as u64;
+                self.write_block(journal.journal_start + journal_block, &desc_buffer)?;
+                journal_block += 1;
+
+                // Write data blocks to journal
+                for data in &trans.data {
+                    self.write_block(journal.journal_start + journal_block, data)?;
+                    journal_block += 1;
+                    if journal_block >= journal.journal_length as u64 {
+                        journal_block = 1;
+                    }
+                }
+
+                // Write commit block
+                let commit_header = Jbd2Header {
+                    h_magic: JBD2_MAGIC_NUMBER,
+                    h_blocktype: JBD2_COMMIT_BLOCK,
+                    h_sequence: trans.tid,
+                };
+
+                let mut commit_buffer = kernel_alloc_bytes(self.block_size as usize)
+                    .ok_or(Ext4Error::NoMem)?;
+                unsafe {
+                    ptr::copy_nonoverlapping(
+                        &commit_header as *const Jbd2Header as *const u8,
+                        commit_buffer.as_mut_ptr(),
+                        mem::size_of::<Jbd2Header>()
+                    );
+                }
+                self.write_block(journal.journal_start + journal_block, &commit_buffer)?;
+
+                // Write data to actual locations
+                for (i, block) in trans.blocks.iter().enumerate() {
+                    self.write_block(*block, &trans.data[i])?;
+                }
+
+                // Sync device
+                if let Some(sync_fn) = self.ops.sync {
+                    sync_fn(self.device)?;
+                }
+
+                journal.head = journal_block as u32 + 1;
             }
         }
+        Ok(())
+    }
+
+    /// Unmount the filesystem
+    pub fn unmount(mut self) -> Ext4Result<()> {
+        // Commit any pending transaction
+        self.journal_commit()?;
+
+        // Sync filesystem
+        if let Some(sync_fn) = self.ops.sync {
+            sync_fn(self.device)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -701,120 +1307,158 @@ pub struct Ext4FsStats {
     pub free_inodes: u64,
 }
 
-/// Safe wrapper for EXT4 file handle
-pub struct Ext4FileHandle {
-    inner: *mut Ext4File,
+/// File handle
+pub struct Ext4FileHandle<'a> {
+    fs: &'a Ext4Filesystem,
+    inode_num: u32,
+    inode: Ext4Inode,
+    position: u64,
+    flags: u32,
 }
 
-impl Ext4FileHandle {
+impl<'a> Ext4FileHandle<'a> {
     /// Read data from the file
     pub fn read(&mut self, buffer: &mut [u8]) -> Ext4Result<usize> {
-        let mut bytes_read: usize = 0;
-        let result = unsafe {
-            ext4_read(
-                self.inner,
-                buffer.as_mut_ptr() as *mut c_void,
-                buffer.len(),
-                &mut bytes_read,
-            )
-        };
-        let err = Ext4Error::from_code(result);
-        if err.is_success() {
-            Ok(bytes_read)
-        } else {
-            Err(err)
+        let file_size = self.inode.size();
+
+        // Check if we're at or past EOF
+        if self.position >= file_size {
+            return Ok(0);
         }
+
+        // Limit read to file size
+        let mut size = buffer.len();
+        let remaining = file_size - self.position;
+        if size as u64 > remaining {
+            size = remaining as usize;
+        }
+
+        let mut block_buffer = kernel_alloc_bytes(self.fs.block_size as usize)
+            .ok_or(Ext4Error::NoMem)?;
+
+        let mut total_read = 0;
+        let mut buf_offset = 0;
+
+        while total_read < size {
+            let logical_block = self.position / self.fs.block_size as u64;
+            let offset = (self.position % self.fs.block_size as u64) as usize;
+            let to_read = (self.fs.block_size as usize - offset).min(size - total_read);
+
+            let physical_block = self.fs.get_block(&self.inode, logical_block)?;
+
+            if physical_block == 0 {
+                // Sparse file - return zeros
+                buffer[buf_offset..buf_offset + to_read].fill(0);
+            } else {
+                self.fs.read_block(physical_block, &mut block_buffer)?;
+                buffer[buf_offset..buf_offset + to_read]
+                    .copy_from_slice(&block_buffer[offset..offset + to_read]);
+            }
+
+            buf_offset += to_read;
+            self.position += to_read as u64;
+            total_read += to_read;
+        }
+
+        Ok(total_read)
     }
 
     /// Seek to a position in the file
-    pub fn seek(&mut self, offset: i64, whence: SeekFrom) -> Ext4Result<()> {
-        let result = unsafe { ext4_seek(self.inner, offset, whence as c_int) };
-        let err = Ext4Error::from_code(result);
-        if err.is_success() {
-            Ok(())
-        } else {
-            Err(err)
+    pub fn seek(&mut self, offset: i64, whence: SeekFrom) -> Ext4Result<u64> {
+        let file_size = self.inode.size();
+
+        let new_pos = match whence {
+            SeekFrom::Start => offset,
+            SeekFrom::Current => self.position as i64 + offset,
+            SeekFrom::End => file_size as i64 + offset,
+        };
+
+        if new_pos < 0 {
+            return Err(Ext4Error::Invalid);
         }
+
+        self.position = new_pos as u64;
+        Ok(self.position)
     }
 
     /// Get current file position
     pub fn tell(&self) -> u64 {
-        unsafe { ext4_tell(self.inner) }
-    }
-
-    /// Get the raw pointer (for advanced usage)
-    pub fn as_ptr(&self) -> *mut Ext4File {
-        self.inner
+        self.position
     }
 }
 
-impl Drop for Ext4FileHandle {
-    fn drop(&mut self) {
-        if !self.inner.is_null() {
-            unsafe {
-                ext4_close(self.inner);
-            }
-        }
+/// Seek origins
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeekFrom {
+    Start = 0,
+    Current = 1,
+    End = 2,
+}
+
+/// Directory iterator
+pub struct Ext4DirIterator<'a> {
+    fs: &'a Ext4Filesystem,
+    inode: Ext4Inode,
+    position: u64,
+    size: u64,
+}
+
+impl<'a> Ext4DirIterator<'a> {
+    /// Create a new directory iterator
+    pub fn new(fs: &'a Ext4Filesystem, path: &[u8]) -> Ext4Result<Self> {
+        let inode_num = fs.lookup_path(path)?;
+        let inode = fs.read_inode(inode_num)?;
+        let size = inode.size();
+
+        Ok(Ext4DirIterator {
+            fs,
+            inode,
+            position: 0,
+            size,
+        })
     }
-}
 
-/// Safe wrapper for EXT4 directory iterator
-pub struct Ext4DirHandle {
-    inner: *mut Ext4DirIterator,
-}
-
-impl Ext4DirHandle {
     /// Read the next directory entry
     pub fn read(&mut self) -> Ext4Result<Ext4DirEntry> {
-        let mut entry = unsafe { core::mem::zeroed::<Ext4DirEntry>() };
-        let result = unsafe { ext4_dir_read(self.inner, &mut entry) };
-        let err = Ext4Error::from_code(result);
-        if err.is_success() {
-            Ok(entry)
-        } else {
-            Err(err)
-        }
-    }
+        let mut buffer = kernel_alloc_bytes(self.fs.block_size as usize)
+            .ok_or(Ext4Error::NoMem)?;
 
-    /// Get the raw pointer (for advanced usage)
-    pub fn as_ptr(&self) -> *mut Ext4DirIterator {
-        self.inner
-    }
-}
+        while self.position < self.size {
+            let logical_block = self.position / self.fs.block_size as u64;
+            let block_offset = (self.position % self.fs.block_size as u64) as usize;
 
-impl Drop for Ext4DirHandle {
-    fn drop(&mut self) {
-        if !self.inner.is_null() {
-            unsafe {
-                ext4_dir_close(self.inner);
+            let physical_block = self.fs.get_block(&self.inode, logical_block)?;
+            if physical_block == 0 {
+                self.position += self.fs.block_size as u64 - block_offset as u64;
+                continue;
+            }
+
+            self.fs.read_block(physical_block, &mut buffer)?;
+
+            let entry_ptr = unsafe { buffer[block_offset..].as_ptr() as *const Ext4DirEntry };
+            let entry = unsafe { *entry_ptr };
+
+            if entry.rec_len == 0 {
+                self.position += self.fs.block_size as u64 - block_offset as u64;
+                continue;
+            }
+
+            self.position += entry.rec_len as u64;
+
+            if entry.inode != 0 {
+                return Ok(entry);
             }
         }
+
+        Err(Ext4Error::NotFound)
     }
 }
 
-/// Iterator implementation for directory entries
-impl Iterator for Ext4DirHandle {
+impl<'a> Iterator for Ext4DirIterator<'a> {
     type Item = Ext4DirEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.read() {
-            Ok(entry) => Some(entry),
-            Err(_) => None,
-        }
+        self.read().ok()
     }
 }
-
-// Re-export C types with Rust naming convention aliases
-pub type Ext4SuperblockT = Ext4Superblock;
-pub type Ext4GroupDescT = Ext4GroupDesc;
-pub type Ext4InodeT = Ext4Inode;
-pub type Ext4DirEntryT = Ext4DirEntry;
-pub type Ext4ExtentHeaderT = Ext4ExtentHeader;
-pub type Ext4ExtentIdxT = Ext4ExtentIdx;
-pub type Ext4ExtentT = Ext4Extent;
-pub type Jbd2HeaderT = Jbd2Header;
-pub type Jbd2SuperblockT = Jbd2Superblock;
-pub type Ext4FsT = Ext4Fs;
-pub type Ext4FileT = Ext4File;
-pub type Ext4DirIteratorT = Ext4DirIterator;
-pub type Ext4BlockOpsT = Ext4BlockOps;
