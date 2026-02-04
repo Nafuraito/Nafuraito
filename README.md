@@ -54,28 +54,9 @@ To build and run the OS in QEMU:
 make run
 ```
 
-## Project Structure
-
-```
-bootloader/       - Stage 1 and Stage 2 bootloaders
-kernel/           - Main kernel source code
-  ├── src/
-  │   ├── drivers/      - Device drivers (ext4, PCI, video, etc.)
-  │   ├── gdt/          - Global Descriptor Table
-  │   ├── idt/          - Interrupt Descriptor Table
-  │   └── memory/       - Memory management and paging
-build/            - Build output and compiled binaries
-DOCUMENTATIONS/   - Additional documentation
-```
-
 ## Documentation
 
-- [Kernel Architecture](./DOCUMENTATIONS/README.md)
-- [ext4 Filesystem with Journaling](./DOCUMENTATIONS/filessystem-ext4journaling/fs.md)
-- [LA57 Paging](./DOCUMENTATIONS/la57-paging.md)
-- [Memory Zones and NUMA](./DOCUMENTATIONS/memory-zones-numa.md)
-- [API Server](./DOCUMENTATIONS/API/API_Server.md)
-- [ext4 Journaling Quick Start](./kernel/src/drivers/ext4journaling/QUICKSTART.md)
+Most documentation can be found in the [DOCUMENTATIONS folder](./DOCUMENTATIONS/).
 
 ## License
 
