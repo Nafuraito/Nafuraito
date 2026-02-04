@@ -23,6 +23,7 @@
 //! - TLB management
 //! - NX (No-Execute) bit support
 //! - Global pages support
+//! - PAT (Page Attribute Table) support for memory type control
 
 #![allow(unused)]
 
@@ -85,12 +86,13 @@ impl PageTableFlags {
     pub const PRESENT: u64 = 1 << 0;          // P - Present
     pub const WRITABLE: u64 = 1 << 1;         // R/W - Read/Write
     pub const USER: u64 = 1 << 2;             // U/S - User/Supervisor
-    pub const WRITE_THROUGH: u64 = 1 << 3;    // PWT - Page-level Write-Through
-    pub const CACHE_DISABLE: u64 = 1 << 4;    // PCD - Page-level Cache Disable
+    pub const WRITE_THROUGH: u64 = 1 << 3;    // PWT - Page-level Write-Through (PAT bit 0)
+    pub const CACHE_DISABLE: u64 = 1 << 4;    // PCD - Page-level Cache Disable (PAT bit 1)
     pub const ACCESSED: u64 = 1 << 5;         // A - Accessed
     pub const DIRTY: u64 = 1 << 6;            // D - Dirty
-    pub const HUGE_PAGE: u64 = 1 << 7;        // PS - Page Size (2MB/1GB pages)
+    pub const HUGE_PAGE: u64 = 1 << 7;        // PS - Page Size (2MB/1GB pages) / PAT bit 2
     pub const GLOBAL: u64 = 1 << 8;           // G - Global
+    pub const PAT: u64 = 1 << 7;              // PAT - Page Attribute Table (bit 7 for 4KB pages)
     pub const NO_EXECUTE: u64 = 1 << 63;      // NX - No Execute
 
     /// Create new flags
@@ -141,6 +143,29 @@ impl PageTableFlags {
     /// Read-only user page
     pub const fn user_readonly() -> Self {
         PageTableFlags(Self::PRESENT | Self::USER)
+    }
+
+    /// Kernel page with memory type (PAT-aware)
+    /// Uses PAT bits (PCD, PWT, PAT) to set memory type
+    pub const fn kernel_with_memory_type(pat_flags: u64) -> Self {
+        PageTableFlags(Self::PRESENT | Self::WRITABLE | Self::GLOBAL | pat_flags)
+    }
+
+    /// User page with memory type (PAT-aware)
+    pub const fn user_with_memory_type(pat_flags: u64) -> Self {
+        PageTableFlags(Self::PRESENT | Self::WRITABLE | Self::USER | pat_flags)
+    }
+
+    /// Uncacheable kernel page (for MMIO)
+    pub const fn kernel_uncacheable() -> Self {
+        // Using PA2: UC (PCD=1, PWT=0, PAT=0)
+        PageTableFlags(Self::PRESENT | Self::WRITABLE | Self::GLOBAL | Self::CACHE_DISABLE)
+    }
+
+    /// Write-combining kernel page (for framebuffer)
+    pub const fn kernel_write_combining() -> Self {
+        // Using PA5: WC (PCD=0, PWT=1, PAT=1)
+        PageTableFlags(Self::PRESENT | Self::WRITABLE | Self::GLOBAL | Self::WRITE_THROUGH | Self::PAT)
     }
 }
 

@@ -187,6 +187,12 @@ mod memory {
         pub fn paging_unmap_page(virt_addr: u64) -> i32;
         pub fn paging_translate_address(virt_addr: u64) -> u64;
         pub fn paging_is_mapped(virt_addr: u64) -> u8;
+
+        // PAT functions
+        pub fn pat_check_support() -> u8;
+        pub fn pat_init_c() -> i32;
+        pub fn pat_is_initialized() -> u8;
+        pub fn pat_read_msr() -> u64;
     }
 }
 
@@ -429,6 +435,26 @@ pub extern "C" fn enter(
             video::print("\n\0");
         } else {
             video::print("  Paging init: FAILED\n\0");
+        }
+
+        // Initialize PAT (Page Attribute Table)
+        video::print("Initializing PAT...\n\0");
+        let pat_supported = memory::pat_check_support();
+        if pat_supported != 0 {
+            video::print("  PAT support: Yes\n\0");
+            let pat_result = memory::pat_init_c();
+            if pat_result == 0 {
+                video::print("  PAT init: OK\n\0");
+                video::print("    Memory types configured:\n\0");
+                video::print("      PA0: WB (Normal memory)\n\0");
+                video::print("      PA1: WT (Write-through)\n\0");
+                video::print("      PA2: UC (MMIO)\n\0");
+                video::print("      PA5: WC (Framebuffer)\n\0");
+            } else {
+                video::print("  PAT init: FAILED\n\0");
+            }
+        } else {
+            video::print("  PAT support: No (not available on this CPU)\n\0");
         }
 
         // Initialize Physical Memory Manager (bitmap allocator)

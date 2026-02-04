@@ -11,6 +11,7 @@
 pub mod e820;
 pub mod pmm;
 pub mod paging;
+pub mod pat;
 
 // Re-export commonly used types
 pub use self::e820::{
@@ -75,6 +76,22 @@ pub use self::paging::{
     PAGE_SIZE, PAGE_SIZE_2MB, PAGE_SIZE_1GB,
     PAGE_TABLE_ENTRIES,
     LA48_VIRT_ADDR_BITS, LA57_VIRT_ADDR_BITS,
+};
+
+pub use self::pat::{
+    MemoryType, PatConfig, PatManager,
+    check_pat_support, pat_init, get_pat_manager,
+    is_pat_initialized, read_pat,
+    // C-compatible wrappers
+    pat_check_support, pat_init_c, pat_is_initialized,
+    pat_get_entry, pat_read_msr,
+    // Page table helper functions
+    memory_type_to_flags,
+    flags_normal_memory, flags_write_through,
+    flags_uncacheable, flags_write_combining,
+    flags_write_protected,
+    // Constants
+    IA32_PAT_MSR,
 };
 
 /// Memory subsystem error type

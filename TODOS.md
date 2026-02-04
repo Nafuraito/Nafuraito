@@ -92,7 +92,12 @@
 - [X] Permission bits (R/W/X, User/Supervisor)
 - [X] NX (No-Execute) bit support
 - [X] TLB management (flush, invalidate)
-- [ ] Page attribute table (PAT) support
+- [X] Page attribute table (PAT) support
+  - [X] PAT detection via CPUID
+  - [X] PAT MSR configuration
+  - [X] Memory type support (WB, WT, UC, WC, WP)
+  - [X] Integration with page tables
+  - [X] Helper functions for MMIO, framebuffer, etc.
 - [ ] Copy-on-Write (CoW) implementation
 - [ ] Demand paging
 - [ ] Memory-mapped files

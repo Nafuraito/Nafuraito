@@ -164,3 +164,21 @@ pub use paging::{
 
 // Re-export PAGE_SIZE from pmm (it's the standard 4KB page size)
 pub use pmm::PAGE_SIZE;
+
+// =============================================================================
+// PAT (Page Attribute Table) - imported from pat.rs
+// =============================================================================
+
+mod pat;
+pub use pat::{
+    MemoryType, PatConfig, PatManager,
+    check_pat_support, pat_init, get_pat_manager,
+    is_pat_initialized, read_pat,
+    pat_check_support, pat_init_c, pat_is_initialized,
+    pat_get_entry, pat_read_msr,
+    memory_type_to_flags,
+    flags_normal_memory, flags_write_through,
+    flags_uncacheable, flags_write_combining,
+    flags_write_protected,
+    IA32_PAT_MSR,
+};
