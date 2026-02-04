@@ -986,6 +986,19 @@ impl PhysicalMemoryManager {
 
 static mut PMM_INSTANCE: Option<PhysicalMemoryManager> = None;
 
+/// Get mutable reference to global PMM instance
+#[inline]
+#[allow(static_mut_refs)]
+unsafe fn get_pmm_mut() -> Option<&'static mut PhysicalMemoryManager> {
+    PMM_INSTANCE.as_mut()
+}
+
+/// Get immutable reference to global PMM instance
+#[inline]
+unsafe fn get_pmm() -> Option<&'static PhysicalMemoryManager> {
+    PMM_INSTANCE.as_ref()
+}
+
 /// Initialize the global PMM
 /// 
 /// # Safety
@@ -999,7 +1012,7 @@ pub unsafe fn pmm_init(memory_map: &MemoryMap) -> Result<(), MemoryError> {
 #[no_mangle]
 pub fn alloc_frame() -> Result<u64, MemoryError> {
     unsafe {
-        match PMM_INSTANCE.as_mut() {
+        match get_pmm_mut() {
             Some(pmm) => pmm.alloc_frame(),
             None => Err(MemoryError {
                 code: 8,
@@ -1014,7 +1027,7 @@ pub fn alloc_frame() -> Result<u64, MemoryError> {
 #[no_mangle]
 pub fn free_frame(addr: u64) -> Result<(), MemoryError> {
     unsafe {
-        match PMM_INSTANCE.as_mut() {
+        match get_pmm_mut() {
             Some(pmm) => pmm.free_frame(addr),
             None => Err(MemoryError {
                 code: 8,
@@ -1029,7 +1042,7 @@ pub fn free_frame(addr: u64) -> Result<(), MemoryError> {
 #[no_mangle]
 pub fn pmm_free_memory() -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_ref() {
+        match get_pmm() {
             Some(pmm) => pmm.free_memory(),
             None => 0,
         }
@@ -1040,7 +1053,7 @@ pub fn pmm_free_memory() -> u64 {
 #[no_mangle]
 pub fn pmm_used_memory() -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_ref() {
+        match get_pmm() {
             Some(pmm) => pmm.used_memory(),
             None => 0,
         }
@@ -1096,7 +1109,7 @@ pub unsafe extern "C" fn pmm_init_c(_memory_map_addr: u64) -> i32 {
 #[no_mangle]
 pub extern "C" fn pmm_alloc_frame() -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_mut() {
+        match get_pmm_mut() {
             Some(pmm) => {
                 match pmm.alloc_frame() {
                     Ok(addr) => addr,
@@ -1119,7 +1132,7 @@ pub extern "C" fn pmm_alloc_frame() -> u64 {
 #[no_mangle]
 pub extern "C" fn pmm_free_frame(addr: u64) -> i32 {
     unsafe {
-        match PMM_INSTANCE.as_mut() {
+        match get_pmm_mut() {
             Some(pmm) => {
                 match pmm.free_frame(addr) {
                     Ok(()) => 0, // Success
@@ -1135,7 +1148,7 @@ pub extern "C" fn pmm_free_frame(addr: u64) -> i32 {
 #[no_mangle]
 pub extern "C" fn pmm_total_memory() -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_ref() {
+        match get_pmm() {
             Some(pmm) => pmm.total_memory(),
             None => 0,
         }
@@ -1146,7 +1159,7 @@ pub extern "C" fn pmm_total_memory() -> u64 {
 #[no_mangle]
 pub extern "C" fn pmm_free_frame_count() -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_ref() {
+        match get_pmm() {
             Some(pmm) => pmm.free_frame_count() as u64,
             None => 0,
         }
@@ -1157,7 +1170,7 @@ pub extern "C" fn pmm_free_frame_count() -> u64 {
 #[no_mangle]
 pub extern "C" fn pmm_used_frame_count() -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_ref() {
+        match get_pmm() {
             Some(pmm) => (pmm.total_frame_count() - pmm.free_frame_count()) as u64,
             None => 0,
         }
@@ -1168,7 +1181,7 @@ pub extern "C" fn pmm_used_frame_count() -> u64 {
 #[no_mangle]
 pub extern "C" fn pmm_is_initialized() -> i32 {
     unsafe {
-        match PMM_INSTANCE.as_ref() {
+        match get_pmm() {
             Some(_) => 1, // Initialized
             None => 0,    // Not initialized
         }
@@ -1184,7 +1197,7 @@ pub extern "C" fn pmm_is_initialized() -> i32 {
 #[no_mangle]
 pub extern "C" fn pmm_is_frame_used(addr: u64) -> i32 {
     unsafe {
-        match PMM_INSTANCE.as_ref() {
+        match get_pmm() {
             Some(pmm) => {
                 if pmm.is_frame_used(addr) { 1 } else { 0 }
             }
@@ -1208,7 +1221,7 @@ pub extern "C" fn pmm_is_frame_used(addr: u64) -> i32 {
 #[no_mangle]
 pub extern "C" fn pmm_alloc_frame_in_zone(zone: u8) -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_mut() {
+        match get_pmm_mut() {
             Some(pmm) => {
                 let memory_zone = match zone {
                     0 => MemoryZone::Dma,
@@ -1228,7 +1241,7 @@ pub extern "C" fn pmm_alloc_frame_in_zone(zone: u8) -> u64 {
 #[no_mangle]
 pub extern "C" fn pmm_alloc_dma_frame() -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_mut() {
+        match get_pmm_mut() {
             Some(pmm) => pmm.alloc_dma_frame().unwrap_or(0),
             None => 0,
         }
@@ -1239,7 +1252,7 @@ pub extern "C" fn pmm_alloc_dma_frame() -> u64 {
 #[no_mangle]
 pub extern "C" fn pmm_alloc_dma32_frame() -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_mut() {
+        match get_pmm_mut() {
             Some(pmm) => pmm.alloc_dma32_frame().unwrap_or(0),
             None => 0,
         }
@@ -1250,7 +1263,7 @@ pub extern "C" fn pmm_alloc_dma32_frame() -> u64 {
 #[no_mangle]
 pub extern "C" fn pmm_zone_free_memory(zone: u8) -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_ref() {
+        match get_pmm() {
             Some(pmm) => {
                 let memory_zone = match zone {
                     0 => MemoryZone::Dma,
@@ -1270,7 +1283,7 @@ pub extern "C" fn pmm_zone_free_memory(zone: u8) -> u64 {
 #[no_mangle]
 pub extern "C" fn pmm_zone_total_memory(zone: u8) -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_ref() {
+        match get_pmm() {
             Some(pmm) => {
                 let memory_zone = match zone {
                     0 => MemoryZone::Dma,
@@ -1298,7 +1311,7 @@ pub extern "C" fn pmm_zone_total_memory(zone: u8) -> u64 {
 #[no_mangle]
 pub extern "C" fn pmm_alloc_frames_contiguous(count: u64, zone: u8) -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_mut() {
+        match get_pmm_mut() {
             Some(pmm) => {
                 let memory_zone = if zone == 0xFF {
                     None
@@ -1330,7 +1343,7 @@ pub extern "C" fn pmm_alloc_frames_contiguous(count: u64, zone: u8) -> u64 {
 #[no_mangle]
 pub extern "C" fn pmm_free_frames_contiguous(base_addr: u64, count: u64) -> i32 {
     unsafe {
-        match PMM_INSTANCE.as_mut() {
+        match get_pmm_mut() {
             Some(pmm) => {
                 match pmm.free_frames_contiguous(base_addr, count as usize) {
                     Ok(()) => 0,
@@ -1346,7 +1359,7 @@ pub extern "C" fn pmm_free_frames_contiguous(base_addr: u64, count: u64) -> i32 
 #[no_mangle]
 pub extern "C" fn pmm_memory_usage_percent() -> u8 {
     unsafe {
-        match PMM_INSTANCE.as_ref() {
+        match get_pmm() {
             Some(pmm) => pmm.memory_usage_percent(),
             None => 0,
         }
@@ -1357,7 +1370,7 @@ pub extern "C" fn pmm_memory_usage_percent() -> u8 {
 #[no_mangle]
 pub extern "C" fn pmm_is_memory_critical() -> i32 {
     unsafe {
-        match PMM_INSTANCE.as_ref() {
+        match get_pmm() {
             Some(pmm) => if pmm.is_memory_critical() { 1 } else { 0 },
             None => 0,
         }
@@ -1372,7 +1385,7 @@ pub extern "C" fn pmm_is_memory_critical() -> i32 {
 #[no_mangle]
 pub extern "C" fn pmm_alloc_frame_numa(node_id: u8) -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_mut() {
+        match get_pmm_mut() {
             Some(pmm) => {
                 let node = NumaNode::new(node_id);
                 pmm.alloc_frame_numa(node).unwrap_or(0)
@@ -1386,7 +1399,7 @@ pub extern "C" fn pmm_alloc_frame_numa(node_id: u8) -> u64 {
 #[no_mangle]
 pub extern "C" fn pmm_numa_node_count() -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_ref() {
+        match get_pmm() {
             Some(pmm) => pmm.numa_node_count() as u64,
             None => 0,
         }
@@ -1397,7 +1410,7 @@ pub extern "C" fn pmm_numa_node_count() -> u64 {
 #[no_mangle]
 pub extern "C" fn pmm_numa_free_memory(node_id: u8) -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_ref() {
+        match get_pmm() {
             Some(pmm) => {
                 let node = NumaNode::new(node_id);
                 pmm.numa_free_memory(node)
@@ -1411,7 +1424,7 @@ pub extern "C" fn pmm_numa_free_memory(node_id: u8) -> u64 {
 #[no_mangle]
 pub extern "C" fn pmm_numa_total_memory(node_id: u8) -> u64 {
     unsafe {
-        match PMM_INSTANCE.as_ref() {
+        match get_pmm() {
             Some(pmm) => {
                 let node = NumaNode::new(node_id);
                 pmm.numa_total_memory(node)
