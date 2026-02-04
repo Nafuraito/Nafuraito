@@ -46,6 +46,8 @@ To compile the project:
 make
 ```
 
+The final disk-image fill be located at `build/disk.img`
+
 ### Running
 
 To build and run the OS in QEMU:
