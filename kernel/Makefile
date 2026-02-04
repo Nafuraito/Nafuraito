@@ -8,16 +8,16 @@ RUSTC = rustc --emit obj -C panic=abort --target x86_64-unknown-linux-gnu \
 
 ASM = nasm
 LD = ld
-CC = gcc -m64 -nostdlib -fno-stack-protector -ffreestanding -c -Wall -Werror -Wpedantic
+CC = gcc -m64 -nostdlib -fno-stack-protector -ffreestanding -c -Wall -Werror -Wpedantic -Ofast
 
-BUILD_DIR = ../../build/kernel
-ROOT_BUILD_DIR = ../../build
+BUILD_DIR = ../build/kernel
+ROOT_BUILD_DIR = ../build
 
 # Library directories
-DRIVERS_DIR = drivers
-GDT_DIR = gdt
-IDT_DIR = idt
-MEMORY_DIR = memory
+DRIVERS_DIR = src/drivers
+GDT_DIR = src/gdt
+IDT_DIR = src/idt
+MEMORY_DIR = src/memory
 
 # Libraries (static archives)
 LIBVIDEO = $(BUILD_DIR)/drivers/video/libvideo.a
@@ -51,9 +51,9 @@ memory:
 # Compile kernel entry and main, then link
 compile: libs
 	@mkdir -p $(BUILD_DIR)
-	$(ASM) entry.asm -f elf64 -o $(BUILD_DIR)/entry.o
-	$(RUSTC) main.rs -o $(BUILD_DIR)/main.o
-	$(LD) -m elf_x86_64 -T linker.ld \
+	$(ASM) src/entry.asm -f elf64 -o $(BUILD_DIR)/entry.o
+	$(RUSTC) src/main.rs -o $(BUILD_DIR)/main.o
+	$(LD) -m elf_x86_64 -T src/linker.ld \
 		$(BUILD_DIR)/entry.o \
 		$(BUILD_DIR)/main.o \
 		$(BUILD_DIR)/drivers/video/vga.o \

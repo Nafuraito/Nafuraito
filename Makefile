@@ -1,7 +1,7 @@
 # Nafuraito Operating System - Main Build Configuration
 
-BOOTLOADER_DIR = src/bootloader
-KERNEL_DIR = src/kernel
+BOOTLOADER_DIR = bootloader
+KERNEL_DIR = kernel
 BUILD_DIR = build
 
 .PHONY: all bootloader kernel disk_image run clean
