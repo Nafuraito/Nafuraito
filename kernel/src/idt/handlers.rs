@@ -52,6 +52,12 @@ fn print_hex(num: u64) {
 /// Exception handler called from assembly
 #[no_mangle]
 pub extern "C" fn exception_handler(vector: u64, error_code: u64) {
+    // Special handling for page faults
+    if vector == 14 {
+        handle_page_fault(error_code);
+        return;
+    }
+    
     let exception_name = match vector {
         0 => "Divide Error",
         1 => "Debug",
@@ -86,6 +92,61 @@ pub extern "C" fn exception_handler(vector: u64, error_code: u64) {
     print(")\n\0");
 
     // Halt the CPU on exceptions for now
+    unsafe {
+        loop {
+            core::arch::asm!("hlt");
+        }
+    }
+}
+
+/// Handle page fault exception with CoW support
+fn handle_page_fault(error_code: u64) {
+    use crate::memory::{cow, VirtAddr, get_page_flags, is_cow_page};
+    
+    // Read CR2 to get the faulting address
+    let faulting_addr: u64;
+    unsafe {
+        core::arch::asm!("mov {}, cr2", out(reg) faulting_addr, options(nomem, nostack));
+    }
+    
+    // Parse error code
+    let present = (error_code & 0x1) != 0;      // Page was present
+    let write = (error_code & 0x2) != 0;        // Write access
+    let user = (error_code & 0x4) != 0;         // User mode access
+    let reserved = (error_code & 0x8) != 0;     // Reserved bit violation
+    let instr_fetch = (error_code & 0x10) != 0; // Instruction fetch
+    
+    // Check if this is a CoW page fault (write to read-only CoW page)
+    if present && write && !reserved {
+        let virt_addr = VirtAddr::new(faulting_addr);
+        
+        // Check if page has CoW flag
+        if let Ok(flags) = get_page_flags(virt_addr) {
+            if is_cow_page(flags) {
+                // Try to handle as CoW fault
+                unsafe {
+                    if let Ok(_) = cow::handle_cow_fault(virt_addr) {
+                        // Successfully handled CoW fault, return to continue execution
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Not a CoW fault or CoW handling failed - print error and halt
+    print("PAGE FAULT: addr=");
+    print_hex(faulting_addr);
+    print(" error=");
+    print_hex(error_code);
+    print(" [");
+    if present { print("P"); } else { print("-"); }
+    if write { print("W"); } else { print("R"); }
+    if user { print("U"); } else { print("K"); }
+    if reserved { print("RSVD"); }
+    if instr_fetch { print("IF"); }
+    print("]\n\0");
+    
     unsafe {
         loop {
             core::arch::asm!("hlt");

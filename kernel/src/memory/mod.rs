@@ -3,7 +3,8 @@
 //! This module provides memory management functionality for the kernel:
 //! - E820 memory map parsing (BIOS memory detection)
 //! - Physical memory management (PMM)
-//! - Virtual memory management (planned)
+//! - Virtual memory management (paging)
+//! - Copy-on-Write (CoW) implementation
 //! - Heap allocation (planned)
 
 #![allow(unused)]
@@ -12,6 +13,7 @@ pub mod e820;
 pub mod pmm;
 pub mod paging;
 pub mod pat;
+pub mod cow;
 
 // Re-export commonly used types
 pub use self::e820::{
@@ -63,6 +65,10 @@ pub use self::paging::{
     read_cr3, write_cr3, read_cr4, write_cr4,
     invlpg, flush_tlb,
     paging_init, get_paging_manager,
+    map_page, unmap_page, map_range, unmap_range,
+    remap_page, translate_address, get_page_flags,
+    identity_map_range, change_page_flags,
+    get_current_page_table, switch_page_table, create_page_table,
     // C-compatible wrappers
     paging_check_la57_support,
     paging_check_nx_support,
@@ -72,6 +78,11 @@ pub use self::paging::{
     paging_get_mode,
     paging_invlpg,
     paging_flush_tlb,
+    paging_map_page,
+    paging_unmap_page,
+    paging_translate_address,
+    paging_is_mapped,
+    paging_identity_map_range,
     // Constants
     PAGE_SIZE, PAGE_SIZE_2MB, PAGE_SIZE_1GB,
     PAGE_TABLE_ENTRIES,
@@ -92,6 +103,19 @@ pub use self::pat::{
     flags_write_protected,
     // Constants
     IA32_PAT_MSR,
+};
+
+pub use self::cow::{
+    COW_BIT,
+    init as cow_init,
+    get_refcount, inc_refcount, dec_refcount, set_refcount,
+    is_cow_page, mark_cow, mark_cow_range,
+    handle_cow_fault,
+    share_page_cow, clone_range_cow, unshare_cow_page,
+    // C-compatible wrappers
+    cow_init_c,
+    cow_mark_page, cow_handle_fault,
+    cow_get_refcount, cow_share_page, cow_clone_range,
 };
 
 /// Memory subsystem error type

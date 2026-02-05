@@ -1043,6 +1043,126 @@ pub fn translate_address(virt_addr: VirtAddr) -> Result<PhysAddr, &'static str> 
     }
 }
 
+/// Get the page table flags for a virtual address
+/// Returns the flags from the page table entry
+pub fn get_page_flags(virt_addr: VirtAddr) -> Result<PageTableFlags, &'static str> {
+    let manager = get_paging_manager().ok_or("Paging not initialized")?;
+    
+    // Check canonical address
+    match manager.mode() {
+        PagingMode::FourLevel => {
+            if !virt_addr.is_canonical_la48() {
+                return Err("Virtual address not canonical for LA48");
+            }
+        }
+        PagingMode::FiveLevel => {
+            if !virt_addr.is_canonical_la57() {
+                return Err("Virtual address not canonical for LA57");
+            }
+        }
+    }
+    
+    let root_table_phys = manager.root_table_phys();
+    
+    unsafe {
+        match manager.mode() {
+            PagingMode::FiveLevel => {
+                let pml5_index = virt_addr.pml5_index();
+                let pml4_index = virt_addr.pml4_index();
+                let pdpt_index = virt_addr.pdpt_index();
+                let pd_index = virt_addr.pd_index();
+                let pt_index = virt_addr.pt_index();
+                
+                // Walk page tables to PT entry
+                let pml5 = phys_to_virt(root_table_phys) as *const PageTable;
+                let pml5_entry = &(*pml5).entries[pml5_index];
+                if !pml5_entry.is_present() {
+                    return Err("Page not mapped (PML5)");
+                }
+                
+                let pml4 = phys_to_virt(pml5_entry.address()) as *const PageTable;
+                let pml4_entry = &(*pml4).entries[pml4_index];
+                if !pml4_entry.is_present() {
+                    return Err("Page not mapped (PML4)");
+                }
+                
+                let pdpt = phys_to_virt(pml4_entry.address()) as *const PageTable;
+                let pdpt_entry = &(*pdpt).entries[pdpt_index];
+                if !pdpt_entry.is_present() {
+                    return Err("Page not mapped (PDPT)");
+                }
+                
+                // Check for 1GB huge page
+                if pdpt_entry.is_huge() {
+                    return Ok(pdpt_entry.flags());
+                }
+                
+                let pd = phys_to_virt(pdpt_entry.address()) as *const PageTable;
+                let pd_entry = &(*pd).entries[pd_index];
+                if !pd_entry.is_present() {
+                    return Err("Page not mapped (PD)");
+                }
+                
+                // Check for 2MB huge page
+                if pd_entry.is_huge() {
+                    return Ok(pd_entry.flags());
+                }
+                
+                let pt = phys_to_virt(pd_entry.address()) as *const PageTable;
+                let pt_entry = &(*pt).entries[pt_index];
+                if !pt_entry.is_present() {
+                    return Err("Page not mapped (PT)");
+                }
+                
+                Ok(pt_entry.flags())
+            }
+            PagingMode::FourLevel => {
+                let pml4_index = virt_addr.pml4_index();
+                let pdpt_index = virt_addr.pdpt_index();
+                let pd_index = virt_addr.pd_index();
+                let pt_index = virt_addr.pt_index();
+                
+                // Walk page tables to PT entry
+                let pml4 = phys_to_virt(root_table_phys) as *const PageTable;
+                let pml4_entry = &(*pml4).entries[pml4_index];
+                if !pml4_entry.is_present() {
+                    return Err("Page not mapped (PML4)");
+                }
+                
+                let pdpt = phys_to_virt(pml4_entry.address()) as *const PageTable;
+                let pdpt_entry = &(*pdpt).entries[pdpt_index];
+                if !pdpt_entry.is_present() {
+                    return Err("Page not mapped (PDPT)");
+                }
+                
+                // Check for 1GB huge page
+                if pdpt_entry.is_huge() {
+                    return Ok(pdpt_entry.flags());
+                }
+                
+                let pd = phys_to_virt(pdpt_entry.address()) as *const PageTable;
+                let pd_entry = &(*pd).entries[pd_index];
+                if !pd_entry.is_present() {
+                    return Err("Page not mapped (PD)");
+                }
+                
+                // Check for 2MB huge page
+                if pd_entry.is_huge() {
+                    return Ok(pd_entry.flags());
+                }
+                
+                let pt = phys_to_virt(pd_entry.address()) as *const PageTable;
+                let pt_entry = &(*pt).entries[pt_index];
+                if !pt_entry.is_present() {
+                    return Err("Page not mapped (PT)");
+                }
+                
+                Ok(pt_entry.flags())
+            }
+        }
+    }
+}
+
 /// Identity map a range of physical memory
 /// Maps physical addresses to the same virtual addresses
 pub unsafe fn identity_map_range(

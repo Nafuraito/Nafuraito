@@ -56,10 +56,6 @@ To build and run the OS in QEMU:
 make run
 ```
 
-## Documentation
-
-Most documentation can be found in the [DOCUMENTATIONS folder](./DOCUMENTATIONS/).
-
 ## License
 
 This project is licensed under a custom license. See [LICENSE.md](./LICENSE.md) for details.

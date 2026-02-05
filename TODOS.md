@@ -98,7 +98,7 @@
   - [X] Memory type support (WB, WT, UC, WC, WP)
   - [X] Integration with page tables
   - [X] Helper functions for MMIO, framebuffer, etc.
-- [ ] Copy-on-Write (CoW) implementation
+- [X] Copy-on-Write (CoW) implementation
 - [ ] Demand paging
 - [ ] Memory-mapped files
 - [ ] Guard pages for stack overflow detection

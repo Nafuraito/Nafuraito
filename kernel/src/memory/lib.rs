@@ -113,6 +113,19 @@ pub struct MemoryError {
     pub fatal: bool,
 }
 
+impl MemoryError {
+    /// Create a new memory error
+    pub const fn new(code: u32, message: &'static str, fatal: bool) -> Self {
+        Self { code, message, fatal }
+    }
+}
+
+impl From<MemoryError> for &'static str {
+    fn from(error: MemoryError) -> Self {
+        error.message
+    }
+}
+
 // =============================================================================
 // Physical Memory Manager (PMM) - imported from pmm.rs
 // =============================================================================
@@ -181,4 +194,21 @@ pub use pat::{
     flags_uncacheable, flags_write_combining,
     flags_write_protected,
     IA32_PAT_MSR,
+};
+
+// =============================================================================
+//  CoW (Copy-on-Write) - imported from cow.rs
+// =============================================================================
+mod cow;
+pub use cow::{
+    COW_BIT,
+    init as cow_init,
+    get_refcount, inc_refcount, dec_refcount, set_refcount,
+    is_cow_page, mark_cow, mark_cow_range,
+    handle_cow_fault,
+    share_page_cow, clone_range_cow, unshare_cow_page,
+    // C-compatible wrappers
+    cow_init as cow_init_c,
+    cow_mark_page, cow_handle_fault,
+    cow_get_refcount, cow_share_page, cow_clone_range,
 };

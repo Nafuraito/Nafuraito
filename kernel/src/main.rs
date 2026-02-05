@@ -193,6 +193,9 @@ mod memory {
         pub fn pat_init_c() -> i32;
         pub fn pat_is_initialized() -> u8;
         pub fn pat_read_msr() -> u64;
+
+        // CoW functions
+        pub fn cow_init();
     }
 }
 
@@ -456,6 +459,11 @@ pub extern "C" fn enter(
         } else {
             video::print("  PAT support: No (not available on this CPU)\n\0");
         }
+
+        // Initialize CoW (Copy-on-Write) system
+        video::print("Initializing CoW system... \0");
+        memory::cow_init();
+        video::print("OK\n\0");
 
         // Initialize Physical Memory Manager (bitmap allocator)
         video::print("Initializing PMM...\n\0");
