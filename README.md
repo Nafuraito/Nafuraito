@@ -15,18 +15,6 @@ Nafuraito is a modern operating system being developed from the ground up. While
 - **Security**: Security-first design principles throughout the system
 - **Performance**: Optimized for speed and efficiency
 
-## Features
-
-- x86_64 architecture support
-- Bootloader with stage1 and stage2 loading
-- ext4 filesystem with journaling
-- Memory management with paging (LA57 support documented)
-- PCI device enumeration and support
-- VGA video driver
-- Interrupt handling (IDT)
-- Global Descriptor Table (GDT)
-- Programmable Interrupt Controller (PIC) support
-
 ## Building
 
 ### Requirements
