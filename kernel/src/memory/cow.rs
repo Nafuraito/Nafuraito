@@ -3,12 +3,6 @@
 //! This module provides Copy-on-Write functionality for efficient memory management,
 //! particularly useful for fork() implementation and shared memory optimization.
 //!
-//! Features:
-//! - Reference counting for physical pages
-//! - CoW page marking and detection
-//! - Page fault handler for CoW pages
-//! - Automatic page copying on write
-//! - Integration with existing paging system
 
 #![allow(unused)]
 

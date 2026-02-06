@@ -32,8 +32,7 @@ prohibited without prior explicit written permission from the copyright holder:
 
 3. Contributions
 
-Contributions are accepted only with the explicit prior permission of the
-copyright holder.
+Contributions are welcome.
 
 By submitting a contribution, you represent and warrant that you own all
 necessary rights to the contribution and hereby grant the copyright holder a

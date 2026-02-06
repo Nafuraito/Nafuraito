@@ -1,13 +1,25 @@
+; =============================================================================
 ; Nafuraito Assembly Bridge (Stage 2 Bootloader)
+; =============================================================================
 ;
-; This is the Stage 2 bootloader that transitions from 16-bit real mode
-; to 64-bit long mode, then loads and jumps to the kernel.
+; This must be loaded sperately since the bootloader (stage 1) is restricted to only
+; 512 Bytes in size, which is too small for all of this.
 ;
-; Memory Layout:
-;   0x7E00 - Stage 2 entry (this code, up to ~0xA600)
-;   0x500  - E820 memory map (safe low memory area)
-;   0x9000 - Page tables (PML4, PDPT, PD, PT)
-;   0x100000 - Kernel load address (1MB)
+; What it does:
+; 1. Get system information (memory map, video mode)
+; 2. Transition from 16-bit real mode -> 32-bit protected mode -> 64-bit long mode
+; 3. Set up paging (required for 64-bit mode)
+; 4. Load the kernel from the EXT4 filesystem
+; 5. Jump to the kernel
+;
+; Memory Layout we're using:
+;   0x0500 - 0x0600: E820 memory map (saved from BIOS)
+;   0x7C00 - 0x7E00: Stage 1 bootloader (still in memory)
+;   0x7E00 - 0xA600: Stage 2 bootloader (this code)
+;   0x9000 - 0xA000: Page tables (PML4, PDPT, PD, PT)
+;   0x100000+: Kernel load address (1MB, away from all bootloader stuff)
+;
+; =============================================================================
 
 ; Use default section for entry
 [SECTION .text.entry]
@@ -15,7 +27,10 @@
 
 global entry
 entry:
-    ; Serial debug: Stage2 started
+    ; -------------------------------------------------------------------------
+    ; Send debug message to serial port
+    ; Output "S2:S" meaning "Stage 2: Started"
+    ; -------------------------------------------------------------------------
     mov dx, 0x3F8
     mov al, 'S'
     out dx, al
@@ -28,7 +43,10 @@ entry:
     mov al, 10
     out dx, al
 
-    ; Set up segments
+    ; -------------------------------------------------------------------------
+    ; Initialize segment registers and stack
+    ; In real mode, we need to set up segments. Zero them for simplicity.
+    ; -------------------------------------------------------------------------
     xor ax, ax
     mov ds, ax
     mov es, ax
@@ -36,23 +54,46 @@ entry:
     mov gs, ax
     mov ss, ax
     mov sp, 0x7C00              ; Stack below Stage 1
+                                  ; Stack grows downward from 0x7C00
 
-    ; Get memory map via E820
+    ; -------------------------------------------------------------------------
+    ; Get the memory map from BIOS via E820 interface
+    ; This tells us which regions of RAM are usable and which are reserved
+    ; We MUST do this now while we still have BIOS access!
+    ; -------------------------------------------------------------------------
     call get_memory_map
 
-    ; Get VESA VBE mode info
+    ; -------------------------------------------------------------------------
+    ; Set up VESA VBE graphics mode
+    ; This queries the BIOS for available video modes and picks the best one
+    ; (highest resolution, 32-bit color)
+    ; -------------------------------------------------------------------------
     call setup_vesa
 
-    ; Enable A20 line
+    ; -------------------------------------------------------------------------
+    ; Enable the A20 line
+    ; On ancient PCs, address line 20 (A20) was disabled for compatibility.
+    ; If we don't enable it, we can't access memory above 1MB!
+    ; This is a historical quirk we have to deal with.
+    ; -------------------------------------------------------------------------
     call enable_a20
 
-    ; Load GDT for protected mode
+    ; -------------------------------------------------------------------------
+    ; Load the GDT (Global Descriptor Table)
+    ; The GDT defines memory segments. Required for protected mode.
+    ; -------------------------------------------------------------------------
     lgdt [gdt_descriptor]
 
-    ; Disable interrupts before mode switch
+    ; -------------------------------------------------------------------------
+    ; Disable interrupts before switching modes
+    ; Interrupts in real mode point to BIOS handlers. In protected mode,
+    ; those addresses are meaningless. Disable them to avoid crashes!
+    ; -------------------------------------------------------------------------
     cli
 
-    ; Serial debug: About to enter protected mode
+    ; -------------------------------------------------------------------------
+    ; Debug message: "S2:P" = "Stage 2: Protected mode"
+    ; -------------------------------------------------------------------------
     mov dx, 0x3F8
     mov al, 'S'
     out dx, al
@@ -65,13 +106,22 @@ entry:
     mov al, 10
     out dx, al
 
-    ; Enable protected mode (set PE bit in CR0)
+    ; -------------------------------------------------------------------------
+    ; Enable Protected Mode!
+    ; CR0 (Control Register 0) has a PE (Protection Enable) bit.
+    ; Setting it switches the CPU to 32-bit protected mode.
+    ; -------------------------------------------------------------------------
     mov eax, cr0
-    or eax, 1
+    or eax, 1               ; Set bit 0 (PE = Protection Enable)
     mov cr0, eax
 
-    ; Far jump to 32-bit code segment
+    ; -------------------------------------------------------------------------
+    ; Far jump to flush the pipeline and start executing 32-bit code
+    ; The CPU's instruction pipeline still has 16-bit instructions in it.
+    ; A far jump clears the pipeline and loads the new code segment selector.
+    ; -------------------------------------------------------------------------
     jmp dword 0x08:protected_mode_entry
+                            ; 0x08 = segment selector for code segment in GDT
 
 ; ============================================================================
 ; Setup VESA VBE Graphics Mode (Auto-detect max resolution)

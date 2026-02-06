@@ -1,16 +1,35 @@
 //! Nafuraito Kernel - PCI Driver Library
+//! =============================================================================
 //!
-//! PCI (Peripheral Component Interconnect) driver for Nafuraito.
-//! Provides comprehensive PCI device enumeration, configuration space access,
-//! and MSI/MSI-X interrupt support.
+//! **PCI** (Peripheral Component Interconnect) is the standard bus for
+//! connecting devices to the computer. 
 //!
-//! This driver implements:
-//! - PCI configuration space access (I/O and memory-mapped)
-//! - Device enumeration and discovery
-//! - MSI (Message Signaled Interrupts) support
-//! - MSI-X (Extended Message Signaled Interrupts) support
-//! - BAR (Base Address Register) handling
-//! - Capability structure parsing
+//! What this driver does:
+//! 
+//! 1. **Device Discovery**: Scan the PCI bus to find all connected devices
+//!    - Walk through all possible bus/device/function combinations
+//!    - Read vendor ID - if it's 0xFFFF, slot is empty
+//!    - For each device, read its capabilities and resources
+//!
+//! 2. **Configuration Space Access**: Read/write device configuration
+//!    - Every PCI device has a 256-byte (or 4KB for PCIe) config space
+//!    - Contains vendor/device ID, class code, BARs, capabilities, etc.
+//!    - It accesses it via I/O ports 0xCF8 (address) and 0xCFC (data)
+//!
+//! 3. **Resource Management**: Handle memory and I/O resources
+//!    - BARs (Base Address Registers) tell us what memory/IO the device needs
+//!    - It reads BARs to find device registers, framebuffers, etc.
+//!
+//! 4. **Interrupt Handling**: Set up MSI/MSI-X for modern interrupt delivery
+//!    - Old way: Shared IRQ lines (slow, messy)
+//!    - New way: MSI - device writes to memory to trigger interrupt (fast!)
+//!    - MSI-X: Like MSI but supports thousands of interrupts per device
+//!
+//! 5. **Capability Parsing**: Read extended device features
+//!    - PCI capabilities are a linked list of feature descriptors
+//!    - E.g., Power Management, MSI, PCIe, Virtualization
+//!
+//! =============================================================================
 
 #![crate_type = "rlib"]
 #![crate_name = "pci"]
@@ -21,12 +40,18 @@
 pub mod msi;
 
 // ============================================================================
-// PCI CONFIGURATION SPACE CONSTANTS
+// PCI CONFIGURATION SPACE CONSTANTS 
+//
+// Every PCI device has a configuration space - 256 bytes of registers.
+// These constants define the byte offsets of important fields.
+// Think of it like a struct, but accessed via I/O ports instead of pointers.
 // ============================================================================
 
 /// PCI Configuration Address Port (I/O)
+/// We write an address here to select which config register we want to access
 const PCI_CONFIG_ADDRESS: u16 = 0xCF8;
-/// PCI Configuration Data Port (I/O)
+/// PCI Configuration Data Port (I/O)  
+/// After selecting an address, we read/write the data here
 const PCI_CONFIG_DATA: u16 = 0xCFC;
 
 /// PCI Configuration Space Register Offsets

@@ -1,12 +1,36 @@
 //! Physical Memory Manager (PMM)
+//! =============================================================================
 //!
-//! Bitmap-based physical frame allocator for the kernel with zone and NUMA support.
-//! Tracks which 4KB page frames are free or allocated.
+//! The PMM (Physical Memory Manager) is like a librarian for RAM. It keeps
+//! track of which "pages" (4KB chunks) of physical memory are free and which
+//! are in use.
 //!
-//! Features:
-//! - DMA-capable memory zones (DMA, DMA32, Normal)
-//! - NUMA-aware allocation for multi-socket systems
-//! - Per-zone statistics and allocation
+//! How does it work?
+//! 
+//! It uses a **bitmap** - one bit per page frame (4KB chunk of RAM):
+//!   - Bit = 0: Page is free, available for allocation
+//!   - Bit = 1: Page is in use (contains kernel code, page tables, data, etc.)
+//! 
+//! For example, if we have 4GB of RAM:
+//!   - 4GB / 4KB = 1,048,576 pages
+//!   - 1,048,576 bits = 131,072 bytes = 128KB of bitmap
+//! 
+//! That's pretty efficient! 128KB to track 4GB of memory.
+//!
+//! **Memory Zones**:
+//! Not all RAM is created equal. Some devices (like old DMA controllers)
+//! can only access certain regions of memory:
+//!   - DMA Zone (0-16MB): For ancient ISA DMA controllers
+//!   - DMA32 Zone (0-4GB): For 32-bit DMA (most modern devices)
+//!   - Normal Zone (4GB+): Regular memory
+//!   - HighMem Zone: Memory above kernel's direct mapping (not used yet)
+//!
+//! **NUMA Support**:
+//! On multi-socket servers, different CPUs have different "local" RAM.
+//! Accessing local RAM is fast, remote RAM is slower. We track this to
+//! allocate memory close to the CPU that will use it.
+//!
+//! =============================================================================
 
 #![allow(unused)]
 
@@ -115,9 +139,11 @@ impl NumaStats {
 }
 
 /// Physical Memory Manager
+///
+/// The main data structure that tracks all physical memory.
 /// 
-/// Uses a bitmap to track allocation status of physical page frames.
-/// Each bit represents one 4KB frame: 0 = free, 1 = used.
+/// Think of this as the "master ledger" - it knows about every single
+/// 4KB page of RAM in the system and whether it's available or in use.
 pub struct PhysicalMemoryManager {
     bitmap: *mut u8,
     bitmap_size: usize,          // in bytes
@@ -197,11 +223,21 @@ impl PhysicalMemoryManager {
     }
 
     /// Initialize the Physical Memory Manager
+    ///
+    /// This is called during kernel boot to set up memory management.
     /// 
+    /// What it does:
+    /// 1. Reads the E820 memory map (from BIOS) to see what RAM exists
+    /// 2. Calculates how much memory we need for the bitmap itself
+    /// 3. Finds a safe place to store the bitmap (must not overwrite kernel!)
+    /// 4. Marks all memory as used, then walks the memory map and marks
+    ///    free regions as free
+    /// 5. Marks special regions as used (kernel, bootloader, bitmap itself)
+    ///
     /// # Safety
-    /// Must be called after memory map is initialized.
-    /// Writes to physical memory for bitmap storage.
-    /// Writes directly to PMM_INSTANCE to avoid struct return ABI issues.
+    /// - Must be called exactly once during kernel initialization
+    /// - Must be called before any memory allocation
+    /// - Writes to physical memory to store the bitmap
     pub unsafe fn init(memory_map: &MemoryMap) -> Result<(), MemoryError> {
         extern "C" {
             fn writestring_vga(data: *const i8);

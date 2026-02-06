@@ -1,4 +1,4 @@
-//! EXT4 Journaling Filesystem Driver - Pure Rust Implementation
+//! EXT4 Journaling Filesystem Driver
 //!
 //! This module provides a complete EXT4 filesystem driver with journaling (JBD2) 
 //! support for the Nafuraito kernel, written entirely in Rust.

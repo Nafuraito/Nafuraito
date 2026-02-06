@@ -1,19 +1,48 @@
 //! Interrupt Descriptor Table (IDT) implementation for x86-64
+//! =============================================================================
 //!
-//! The IDT is used to handle interrupts and exceptions on x86-64 processors.
-//! It contains 256 entries, each describing how to handle a specific interrupt vector.
+//! The IDT (Interrupt Descriptor Table) is like a phone book for interrupts.
+//! When something happens (hardware interrupt, exception, software interrupt),
+//! the CPU looks up the handler address in the IDT and jumps to it.
 //!
-//! Structure (64-bit mode):
-//! - Each entry is 16 bytes
-//! - 256 entries total (vectors 0-255)
-//! - Entries 0-31: CPU exceptions
-//! - Entries 32-255: External interrupts (IRQs, software interrupts)
+//! What are interrupts and exceptions?
+//!
+//! **Exceptions (vectors 0-31)**: These are CPU-generated errors
+//!   - Divide by zero (vector 0)
+//!   - Page fault (vector 14): Invalid memory access
+//!   - General protection fault (vector 13): Access violation
+//!   - Double fault (vector 8): Exception while handling another exception!
+//!   Most exceptions are fatal and cause the kernel to panic.
+//!
+//! **Hardware Interrupts (IRQs, vectors 32-47)**: External device signals
+//!   - Timer (IRQ 0 / vector 32): Fires periodically for timekeeping
+//!   - Keyboard (IRQ 1 / vector 33): Key pressed or released
+//!   - Hard disk (IRQ 14/15): Disk operation completed
+//!   These are expected and we handle them then continue execution.
+//!
+//! **Software Interrupts (vectors 48-255)**: Triggered by INT instruction
+//!   - System calls (INT 0x80 on Linux, or SYSCALL instruction)
+//!   - Custom interrupts for IPC, debugging, etc.
+//!
+//! IDT Structure in 64-bit mode:
+//! - Each entry is 16 bytes (double the size of 32-bit!)
+//! - 256 entries total = 4096 bytes (one page)
+//! - Entry format: handler address, segment selector, flags
+//!
+//! =============================================================================
 
 mod handlers;
 
 use core::mem::size_of;
 
 /// IDT Entry (16 bytes in 64-bit mode)
+/// 
+/// Each entry tells the CPU:
+/// 1. Where to jump when this interrupt fires (handler address)
+/// 2. Which code segment to use (must be kernel code)
+/// 3. What type of gate this is (interrupt vs trap)
+/// 4. Which privilege level can trigger it
+/// 5. Whether to use an alternate stack (IST)
 #[repr(C, packed)]
 #[derive(Copy, Clone)]
 pub struct IdtEntry {
@@ -35,6 +64,9 @@ pub struct IdtEntry {
 
 impl IdtEntry {
     /// Create a new null IDT entry
+        /// 
+        /// A null entry means this interrupt is not handled.
+        /// If it fires, the CPU will triple-fault and reset (not good!)
     pub const fn new() -> Self {
         IdtEntry {
             offset_low: 0,
@@ -48,6 +80,9 @@ impl IdtEntry {
     }
 
     /// Set the handler function address and configure the entry
+        ///
+        /// This is the low-level function to configure an IDT entry.
+        /// Most code should use set_interrupt_gate() or set_trap_gate() instead.
     ///
     /// # Arguments
     /// * `handler` - Address of the interrupt handler function

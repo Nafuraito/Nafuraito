@@ -1,16 +1,26 @@
 /**
+ * =============================================================================
  * ext4_boot.c - EXT4 Filesystem Reader for Bootloader
+ * =============================================================================
  * 
- * This is a minimal, self-contained ext4 reader for the stage2 bootloader.
- * It reads an ext4 filesystem with journaling support from a raw disk.
+ * This is a minimal, self-contained EXT4 filesystem reader designed specifically
+ * for our Stage 2 bootloader. We need to read the kernel from an EXT4 partition,
+ * but we can't use any external libraries. So we implement just enough EXT4
+ * support to find and read files.
  * 
- * Features:
+ * What it supports:
  * - Read-only operation (safe for journaled filesystems)
- * - Supports extent-based block mapping (modern ext4)
- * - Supports indirect block mapping (legacy/compatibility)
- * - Uses static buffers (no dynamic memory allocation)
- * - Works with 1KB, 2KB, or 4KB block sizes
- */
+ * - Extent-based block mapping (modern EXT4)
+ * - Indirect block mapping (legacy/compatibility mode)
+ * - Directory traversal to find files by path
+ * - Multiple block sizes (1KB, 2KB, 4KB)
+ * 
+ * Memory usage:
+ * - Static buffers only (no dynamic allocation besides our heap allocator)
+ * - Two 4KB block buffers for reading data
+ * - One superblock structure
+ * 
+ * ============================================================================= */
 
 #include "ext4_boot.h"
 
@@ -22,7 +32,13 @@ static uint8_t block_buffer2[EXT4_BLOCK_BUFFER_SIZE] __attribute__((aligned(16))
 static ext4_superblock_t superblock;
 
 /* ==========================================================================
- * ATA DISK I/O (borrowed from kernel_loader.c)
+ * ATA DISK I/O
+ * ==========================================================================
+ * 
+ * These functions handle low-level disk access using the ATA PIO interface.
+ * They're simpler versions of the ones in kernel_loader.c, specialized for
+ * reading filesystem blocks.
+ * 
  * ========================================================================== */
 
 /* Wait for ATA drive to be ready */
@@ -32,11 +48,11 @@ static int ata_wait_ready_ext4(void) {
     
     while (timeout--) {
         status = inb(ATA_PRIMARY_STATUS);
-        if (status & ATA_STATUS_ERR) return 0;
-        if (status & ATA_STATUS_BSY) continue;
-        if (status & ATA_STATUS_RDY) return 1;
+        if (status & ATA_STATUS_ERR) return 0;  // Error - abort
+        if (status & ATA_STATUS_BSY) continue;  // Busy - keep waiting
+        if (status & ATA_STATUS_RDY) return 1;  // Ready!
     }
-    return 0;
+    return 0;  // Timeout
 }
 
 /* Wait for data request */
@@ -46,18 +62,21 @@ static int ata_wait_drq_ext4(void) {
     
     while (timeout--) {
         status = inb(ATA_PRIMARY_STATUS);
-        if (status & ATA_STATUS_BSY) continue;
-        if (status & ATA_STATUS_ERR) return 0;
-        if (status & ATA_STATUS_DRQ) return 1;
+        if (status & ATA_STATUS_BSY) continue;  // Busy - keep waiting
+        if (status & ATA_STATUS_ERR) return 0;  // Error - abort
+        if (status & ATA_STATUS_DRQ) return 1;  // Data ready!
     }
-    return 0;
+    return 0;  // Timeout
 }
 
 /**
  * Read sectors from ATA drive
  * 
- * @param dest      Destination buffer
- * @param lba       Logical Block Address (sector number)
+ * This is our connection to the physical disk. It reads 512-byte sectors
+ * from the specified LBA (Logical Block Address) and puts them in a buffer.
+ * 
+ * @param dest      Destination buffer (must be large enough!)
+ * @param lba       Logical Block Address (which 512-byte sector to start at)
  * @param count     Number of 512-byte sectors to read
  * @return          1 on success, 0 on failure
  */
@@ -79,7 +98,7 @@ static int ata_read_sectors_ext4(void *dest, uint64_t lba, uint32_t count) {
         
         if (!ata_wait_drq_ext4()) return 0;
         
-        insw(ATA_PRIMARY_DATA, buffer, 256);
+        insw(ATA_PRIMARY_DATA, buffer, 256);  // 256 words = 512 bytes
         
         buffer += 512;
         lba++;

@@ -1,21 +1,52 @@
+//! =============================================================================
 //! Nafuraito Kernel Entry Point
+//! =============================================================================
 //! 
-//! This is the main entry point for the Nafuraito operating system kernel.
-//! It initializes all subsystems and halts the CPU.
+//! Welcome to the heart of the Nafuraito operating system!
+//! 
+//! This file is where everything comes together. The bootloader has done its
+//! job and handed control over to us. Now it's our turn to:
+//! 
+//! 1. Set up the execution environment (GDT, IDT, interrupts)
+//! 2. Initialize memory management (physical and virtual memory)
+//! 3. Set up device drivers (PCI, video, etc.)
+//! 4. Eventually start the first user process
+//! 
+//! We're running in 64-bit long mode with paging enabled. The bootloader
+//! set up a basic identity map for us, but we'll need to do more sophisticated
+//! memory management soon.
+//! 
+//! Note: We're using #![no_std] - this means we don't have the Rust standard
+//! library. No Vec, String, println!, or any of that. We're on our own!
+//! 
+//! =============================================================================
 
 #![crate_type = "staticlib"]
-#![no_std]
-#![no_main]
-#![allow(unused)]
+#![no_std]   // We're a kernel - no standard library for us!
+#![no_main]  // We define our own entry point (not the usual main())
+#![allow(unused)]  // Allow unused code while we're developing
 
 use core::panic::PanicInfo;
 
-// Simple serial output for debugging (COM1)
+// =============================================================================
+// Serial Debug Output
+// =============================================================================
+//
+// These functions let us write to the COM1 serial port for debugging.
+// When running in QEMU or with a serial cable, we can see kernel messages
+// even if the screen isn't working. Super useful for debugging!
+//
+// =============================================================================
+
+/// Send a single byte to the serial port (COM1)
 #[inline(always)]
 unsafe fn serial_outb(val: u8) {
+    // Out instruction: sends a byte to an I/O port
+    // COM1 is at port 0x3F8
     core::arch::asm!("out dx, al", in("dx") 0x3F8u16, in("al") val, options(nomem, nostack));
 }
 
+/// Print a string to the serial port
 #[inline(always)]
 unsafe fn serial_print(s: &str) {
     for &b in s.as_bytes() {
@@ -23,6 +54,7 @@ unsafe fn serial_print(s: &str) {
     }
 }
 
+/// Print a 64-bit hex number to serial (like 0x1234ABCD)
 #[inline(always)]
 unsafe fn serial_print_hex_u64(mut num: u64) {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
@@ -31,27 +63,43 @@ unsafe fn serial_print_hex_u64(mut num: u64) {
         serial_print("0");
         return;
     }
+    // Convert number to hex digits (right to left, then reverse)
     let mut buf = [0u8; 16];
     let mut i = 0usize;
     while num > 0 && i < 16 {
-        let digit = (num & 0xF) as usize;
+        let digit = (num & 0xF) as usize;  // Get lowest 4 bits
         buf[i] = HEX[digit];
-        num >>= 4;
+        num >>= 4;  // Shift right by 4 bits
         i += 1;
     }
+    // Print in reverse order (most significant digit first)
     while i > 0 {
         i -= 1;
         serial_outb(buf[i]);
     }
 }
 
+// =============================================================================
+// Panic Handler
+// =============================================================================
+//
+// When Rust code panics (like calling unwrap() on None), this function is called.
+// Since we're no_std, we have to provide our own panic handler.
+// 
+// All we can do here is halt the CPU - we're in an unrecoverable state.
+// In a more sophisticated kernel, we might try to print a panic message and
+// backtrace, but for now we just stop.
+//
+// =============================================================================
+
 /// Panic handler for the kernel
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
+    // Infinite halt loop - the CPU will stay here forever
     loop {
         unsafe {
-            core::arch::asm!("cli");
-            core::arch::asm!("hlt");
+            core::arch::asm!("cli");  // Disable interrupts
+            core::arch::asm!("hlt");  // Halt the CPU
         }
     }
 }
@@ -59,27 +107,40 @@ fn panic(_info: &PanicInfo) -> ! {
 // =============================================================================
 // Required Memory Functions for no_std
 // =============================================================================
+//
+// When we use #![no_std], Rust still needs some basic memory functions.
+// These are usually provided by the C library, but we don't have one.
+// So we implement them ourselves - simple byte-by-byte versions.
+//
+// These are marked #[no_mangle] so the linker can find them, and they
+// use "C" calling convention so they match what LLVM expects.
+//
+// =============================================================================
 
+/// Copy memory from src to dest (dest and src must not overlap!)
 #[no_mangle]
 pub unsafe extern "C" fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
     let mut i = 0;
     while i < n {
-        *dest.add(i) = *src.add(i);
+        *dest.add(i) = *src.add(i);  // Copy byte by byte
         i += 1;
     }
     dest
 }
 
+/// Fill memory with a constant byte
 #[no_mangle]
 pub unsafe extern "C" fn memset(dest: *mut u8, c: i32, n: usize) -> *mut u8 {
     let mut i = 0;
     while i < n {
-        *dest.add(i) = c as u8;
+        *dest.add(i) = c as u8;  // Set each byte to c
         i += 1;
     }
     dest
 }
 
+/// Compare two memory regions
+/// Returns 0 if equal, negative if s1 < s2, positive if s1 > s2
 #[no_mangle]
 pub unsafe extern "C" fn memcmp(s1: *const u8, s2: *const u8, n: usize) -> i32 {
     let mut i = 0;
@@ -94,9 +155,11 @@ pub unsafe extern "C" fn memcmp(s1: *const u8, s2: *const u8, n: usize) -> i32 {
     0
 }
 
+/// Move memory (like memcpy but handles overlapping regions)
 #[no_mangle]
 pub unsafe extern "C" fn memmove(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
     if (dest as usize) < (src as usize) {
+        // Dest is before src - copy forward
         memcpy(dest, src, n)
     } else {
         let mut i = n;
@@ -263,15 +326,34 @@ fn print_hex_u64(num: u64) {
 // =============================================================================
 // Exception/IRQ Handlers (called from assembly in libidt.a)
 // =============================================================================
+//
+// When a CPU exception happens (like divide by zero, page fault, etc.) or
+// a hardware interrupt fires (timer, keyboard, etc.), the IDT directs control
+// to assembly stubs that eventually call these Rust functions.
+//
+// We print information about what happened and then halt (for exceptions) or
+// handle the interrupt and continue (for IRQs).
+//
+// =============================================================================
 
+/// Called when a CPU exception occurs
+/// 
+/// CPU exceptions are things like:
+/// - Divide by zero (vector 0)
+/// - Page faults (vector 14)
+/// - General protection faults (vector 13)
+/// - Double faults (vector 8) - when handling an exception causes another exception
+/// 
+/// Most of these are fatal - we print details and halt
 #[no_mangle]
 pub extern "C" fn exception_handler(
-    vector: u64,
-    error_code: u64,
-    rip: u64,
-    cs: u64,
-    rflags: u64,
+    vector: u64,       // Which exception (0-31)
+    error_code: u64,   // Some exceptions push an error code
+    rip: u64,          // Instruction pointer where exception occurred
+    cs: u64,           // Code segment
+    rflags: u64,       // CPU flags register
 ) {
+    // Map vector number to human-readable exception name
     let exception_name = match vector {
         0 => "Divide Error\0", 1 => "Debug\0", 2 => "NMI\0", 3 => "Breakpoint\0",
         4 => "Overflow\0", 5 => "Bound Range\0", 6 => "Invalid Opcode\0", 7 => "Device Not Available\0",
@@ -281,7 +363,9 @@ pub extern "C" fn exception_handler(
         19 => "SIMD Exception\0", 20 => "Virtualization\0", 21 => "Control Protection\0",
         _ => "Unknown\0",
     };
+    
     unsafe {
+        // Print to serial port first (most reliable)
         serial_print("EXCEPTION: ");
         serial_print(exception_name);
         serial_print(" (vector=");
@@ -297,6 +381,7 @@ pub extern "C" fn exception_handler(
         serial_print_hex_u64(rflags);
         serial_print("\n");
 
+        // Also print to screen if video is initialized
         video::print("EXCEPTION: \0");
         video::print(exception_name);
         video::print(" (vector=\0");
@@ -311,38 +396,56 @@ pub extern "C" fn exception_handler(
         video::print(" RFLAGS=\0");
         print_hex_u64(rflags);
         video::print("\n\0");
+        
+        // Hang forever - this is fatal
         loop { core::arch::asm!("hlt"); }
     }
 }
 
+/// Called when a hardware interrupt (IRQ) fires
+/// 
+/// Hardware interrupts are things like:
+/// - IRQ 0 (vector 32): Timer interrupt - fires ~1200 times per second
+/// - IRQ 1 (vector 33): Keyboard interrupt - fires when a key is pressed
+/// - IRQ 14/15: Hard disk interrupts
+/// - etc.
+/// 
+/// Unlike exceptions, IRQs are expected and we handle them then continue
 #[no_mangle]
 pub extern "C" fn irq_handler(irq: u64) {
     unsafe {
         match irq {
             32 => {
+                // Timer interrupt (IRQ 0)
+                // Fires about 1200 times per second
                 static mut TICK: u64 = 0;
                 TICK += 1;
                 if TICK % 1200 == 0 {
-                    // Every second
+                    // Print every second (1200 ticks)
                     video::print("Timer: \0");
                     print_hex_u64(TICK);
                     video::print("\n\0");
                 }
             }
             33 => {
-                let scancode = pic::pic_inb(0x60);
+                // Keyboard interrupt (IRQ 1)
+                // Read the scancode from the keyboard controller
+                let scancode = pic::pic_inb(0x60);  // Keyboard data port
                 video::print("Key: \0");
                 print_hex_u64(scancode as u64);
                 video::print("\n\0");
             }
             _ => {
+                // Unknown IRQ - just print it
                 video::print("IRQ: \0");
                 print_hex_u64(irq);
                 video::print("\n\0");
             }
         }
         
-        // Send EOI
+        // Send End-Of-Interrupt signal to the PIC
+        // This tells the interrupt controller we're done handling this IRQ
+        // Important: if we don't do this, we won't get any more interrupts!
         pic::send_eoi((irq - 32) as u8);
     }
 }
@@ -350,16 +453,38 @@ pub extern "C" fn irq_handler(irq: u64) {
 // =============================================================================
 // Kernel Entry Point
 // =============================================================================
+//
+// This is where the bootloader hands control to the kernel! The bootloader has:
+// - Loaded the kernel into memory at 0x100000 (1MB)
+// - Set up a basic identity map for paging
+// - Switched to 64-bit long mode
+// - Jumped to this function
+//
+// Parameters passed from bootloader:
+//   fb_addr         - Physical address of framebuffer (for graphics)
+//   pitch           - Bytes per scanline
+//   width/height    - Screen resolution
+//   bpp             - Bits per pixel
+//   memory_map_addr - Address of E820 memory map (tells us what RAM is available)
+//
+// Our job:
+// 1. Initialize CPU structures (GDT, IDT)
+// 2. Initialize interrupt controllers (PIC)
+// 3. Set up memory management (PMM, paging, PAT)
+// 4. Initialize device drivers
+// 5. Eventually start the first process (not implemented yet)
+//
+// =============================================================================
 
 #[no_mangle]
 pub extern "C" fn enter(
-    fb_addr: u32,
-    pitch: u32,
-    width: u32,
-    height: u32,
-    bpp: u32,
-    memory_map_addr: u64
-) -> ! {
+    fb_addr: u32,           // Framebuffer physical address
+    pitch: u32,             // Bytes per scanline
+    width: u32,             // Screen width in pixels
+    height: u32,            // Screen height in pixels
+    bpp: u32,               // Bits per pixel (usually 32)
+    memory_map_addr: u64    // Address of E820 memory map
+) -> ! {  // The "!" means this function never returns
     unsafe {
         // Initialize GDT and TSS first
         gdt::gdt_init();

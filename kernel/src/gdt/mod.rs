@@ -1,16 +1,20 @@
 //! Global Descriptor Table (GDT) Module
+//! =============================================================================
 //!
-//! This module provides a complete GDT implementation for x86-64 including:
-//! - Kernel code segment (Ring 0)
-//! - Kernel data segment (Ring 0)
-//! - User code segment (Ring 3)
-//! - User data segment (Ring 3)
-//! - Task State Segment (TSS)
+//! The GDT is one of the fundamental data structures in x86-64 architecture.
 //!
-//! The GDT is essential for:
-//! - Memory segmentation (though mostly flat in 64-bit mode)
-//! - Privilege level transitions (kernel <-> user mode)
-//! - Interrupt handling (via TSS stack pointers)
+//! In 64-bit mode, segmentation is mostly "flat" (all segments cover
+//! all memory), but we still need the GDT for privilege levels and the TSS.
+//!
+//! Our GDT layout:
+//! - Entry 0 (0x00): Null descriptor (required by CPU, never used)
+//! - Entry 1 (0x08): Kernel code segment (Ring 0)
+//! - Entry 2 (0x10): Kernel data segment (Ring 0)
+//! - Entry 3 (0x18): User data segment (Ring 3)
+//! - Entry 4 (0x20): User code segment (Ring 3)
+//! - Entry 5-6 (0x28): TSS descriptor (16 bytes in 64-bit mode)
+//!
+//! =============================================================================
 
 #![allow(unused)]
 
@@ -20,7 +24,17 @@ use core::mem::size_of;
 use self::tss::TaskStateSegment;
 
 // =============================================================================
-// Segment Selectors
+// Segment Selectors  
+//
+// A "selector" is a 16-bit value that points to a GDT entry.
+// Format: | Index (13 bits) | TI (1 bit) | RPL (2 bits) |
+//         - Index: Which GDT entry (multiply by 8 for byte offset)
+//         - TI (Table Indicator): 0 = GDT, 1 = LDT
+//         - RPL (Requested Privilege Level): 0-3
+//
+// So 0x08 = index 1, GDT, ring 0 -> Kernel Code
+//    0x10 = index 2, GDT, ring 0 -> Kernel Data
+//    0x1B = index 3, GDT, ring 3 -> User Data
 // =============================================================================
 
 /// Segment selector for the kernel code segment (Ring 0)

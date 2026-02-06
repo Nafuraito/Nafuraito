@@ -1,29 +1,5 @@
 //! Paging Module with LA57 (5-Level Paging) Support
-//!
-//! This module provides virtual memory management using both 4-level (LA48) 
-//! and 5-level (LA57) paging, depending on CPU capabilities.
-//!
-//! LA48 (4-level): 48-bit virtual address space (256 TiB)
-//! - PML4 (Page Map Level 4)
-//! - PDPT (Page Directory Pointer Table)
-//! - PD (Page Directory)
-//! - PT (Page Table)
-//!
-//! LA57 (5-level): 57-bit virtual address space (128 PiB)
-//! - PML5 (Page Map Level 5)
-//! - PML4 (Page Map Level 4)
-//! - PDPT (Page Directory Pointer Table)
-//! - PD (Page Directory)
-//! - PT (Page Table)
-//!
-//! Features:
-//! - Automatic detection of LA57 support
-//! - Dynamic switching between 4-level and 5-level paging
-//! - Page table manipulation (map/unmap/remap)
-//! - TLB management
-//! - NX (No-Execute) bit support
-//! - Global pages support
-//! - PAT (Page Attribute Table) support for memory type control
+//! =============================================================================
 
 #![allow(unused)]
 
@@ -78,22 +54,30 @@ pub const LA48_VIRT_ADDR_SIZE: u64 = 1u64 << LA48_VIRT_ADDR_BITS;  // 256 TiB
 pub const LA57_VIRT_ADDR_SIZE: u64 = 1u64 << LA57_VIRT_ADDR_BITS;  // 128 PiB
 
 /// Page table entry flags
+/// 
+/// Each page table entry is 64 bits:
+/// - Bits 0-11: Flags (present, writable, user-accessible, etc.)
+/// - Bits 12-51: Physical address of page or next-level table
+/// - Bits 52-62: More flags and reserved bits
+/// - Bit 63: NX (No-Execute) bit
+///
+/// These flags control how the page can be accessed
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PageTableFlags(u64);
 
 impl PageTableFlags {
-    pub const PRESENT: u64 = 1 << 0;          // P - Present
-    pub const WRITABLE: u64 = 1 << 1;         // R/W - Read/Write
-    pub const USER: u64 = 1 << 2;             // U/S - User/Supervisor
-    pub const WRITE_THROUGH: u64 = 1 << 3;    // PWT - Page-level Write-Through (PAT bit 0)
-    pub const CACHE_DISABLE: u64 = 1 << 4;    // PCD - Page-level Cache Disable (PAT bit 1)
-    pub const ACCESSED: u64 = 1 << 5;         // A - Accessed
-    pub const DIRTY: u64 = 1 << 6;            // D - Dirty
-    pub const HUGE_PAGE: u64 = 1 << 7;        // PS - Page Size (2MB/1GB pages) / PAT bit 2
-    pub const GLOBAL: u64 = 1 << 8;           // G - Global
-    pub const PAT: u64 = 1 << 7;              // PAT - Page Attribute Table (bit 7 for 4KB pages)
-    pub const NO_EXECUTE: u64 = 1 << 63;      // NX - No Execute
+    pub const PRESENT: u64 = 1 << 0;          // P - Present: Must be 1 for page to be accessible
+    pub const WRITABLE: u64 = 1 << 1;         // R/W - If 0, page is read-only
+    pub const USER: u64 = 1 << 2;             // U/S - If 0, only kernel can access
+    pub const WRITE_THROUGH: u64 = 1 << 3;    // PWT - Write-through caching (PAT bit 0)
+    pub const CACHE_DISABLE: u64 = 1 << 4;    // PCD - Disable caching for this page (PAT bit 1)
+    pub const ACCESSED: u64 = 1 << 5;         // A - CPU sets this when page is accessed
+    pub const DIRTY: u64 = 1 << 6;            // D - CPU sets this when page is written to
+    pub const HUGE_PAGE: u64 = 1 << 7;        // PS - 2MB/1GB page instead of 4KB
+    pub const GLOBAL: u64 = 1 << 8;           // G - Don't flush from TLB on CR3 change
+    pub const PAT: u64 = 1 << 7;              // PAT - Memory type (WB, WT, UC, WC, etc.)
+    pub const NO_EXECUTE: u64 = 1 << 63;      // NX - CPU will fault if we try to execute code here
 
     /// Create new flags
     pub const fn new() -> Self {
