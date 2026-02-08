@@ -14,6 +14,7 @@ pub mod pmm;
 pub mod paging;
 pub mod pat;
 pub mod cow;
+pub mod demand_paging;
 
 // Re-export commonly used types
 pub use self::e820::{
@@ -116,6 +117,12 @@ pub use self::cow::{
     cow_init_c,
     cow_mark_page, cow_handle_fault,
     cow_get_refcount, cow_share_page, cow_clone_range,
+};
+
+pub use self::demand_paging::{
+    BackingKind, VmRegion,
+    register_region as demand_register_region,
+    handle_demand_page_fault,
 };
 
 /// Memory subsystem error type

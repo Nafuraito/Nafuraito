@@ -212,3 +212,14 @@ pub use cow::{
     cow_mark_page, cow_handle_fault,
     cow_get_refcount, cow_share_page, cow_clone_range,
 };
+
+// =============================================================================
+// Demand Paging - imported from demand_paging.rs
+// =============================================================================
+
+mod demand_paging;
+pub use demand_paging::{
+    BackingKind, VmRegion,
+    register_region as demand_register_region,
+    handle_demand_page_fault,
+};

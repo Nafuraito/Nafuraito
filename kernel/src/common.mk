@@ -7,10 +7,10 @@ RUSTC = rustc --emit obj -C panic=abort --target x86_64-unknown-linux-gnu \
         -C opt-level=3 -C overflow-checks=no -C debug-assertions=no \
         -C target-feature=-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-avx,-avx2,-soft-float
 
-ASM = nasm
+ASM = nasm -Ox
 LD = ld
 AR = ar
-CC = gcc
+CC = gcc -Ofast -Wall -Werror -Wpedantic
 
 # Common flags
 CFLAGS = -m64 -nostdlib -fno-stack-protector -ffreestanding -c -Wall -Werror -Wpedantic \

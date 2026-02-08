@@ -101,7 +101,10 @@ pub extern "C" fn exception_handler(vector: u64, error_code: u64) {
 
 /// Handle page fault exception with CoW support
 fn handle_page_fault(error_code: u64) {
-    use crate::memory::{cow, VirtAddr, get_page_flags, is_cow_page};
+    use crate::memory::{
+        cow, VirtAddr, get_page_flags, is_cow_page,
+        handle_demand_page_fault,
+    };
     
     // Read CR2 to get the faulting address
     let faulting_addr: u64;
@@ -116,7 +119,15 @@ fn handle_page_fault(error_code: u64) {
     let reserved = (error_code & 0x8) != 0;     // Reserved bit violation
     let instr_fetch = (error_code & 0x10) != 0; // Instruction fetch
     
-    // Check if this is a CoW page fault (write to read-only CoW page)
+    // Demand paging: handle not-present faults for registered regions.
+    if !present && !reserved {
+        let virt_addr = VirtAddr::new(faulting_addr);
+        if handle_demand_page_fault(virt_addr, error_code).is_ok() {
+            return;
+        }
+    }
+
+    // Copy-on-Write: handle write to read-only CoW page.
     if present && write && !reserved {
         let virt_addr = VirtAddr::new(faulting_addr);
         
@@ -126,7 +137,7 @@ fn handle_page_fault(error_code: u64) {
                 // Try to handle as CoW fault
                 unsafe {
                     if let Ok(_) = cow::handle_cow_fault(virt_addr) {
-                        // Successfully handled CoW fault, return to continue execution
+                        // Successfully handled CoW fault, return to continue execution.
                         return;
                     }
                 }

@@ -20,8 +20,8 @@ kernel:
 disk_image: bootloader kernel
 	@mkdir -p $(BUILD_DIR)
 	@echo "Creating bootable disk image with ext4 filesystem..."
-	# Create empty disk image (512MB)
-	dd if=/dev/zero of=$(BUILD_DIR)/disk.img bs=1M count=512 2>/dev/null
+	# Create empty disk image (128MB)
+	dd if=/dev/zero of=$(BUILD_DIR)/disk.img bs=1M count=128 2>/dev/null
 
 	# Create partition table FIRST (before writing bootloader, as parted mklabel overwrites MBR)
 	parted -s $(BUILD_DIR)/disk.img mklabel msdos

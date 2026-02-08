@@ -1,7 +1,7 @@
 # Nafuraito Bootloader Build Configuration
 
-ASM = nasm
-CC = gcc
+ASM = nasm -Ox
+CC = gcc -Ofast -Wall -Werror -Wpedantic
 LD = ld
 
 BUILD_DIR = ../build

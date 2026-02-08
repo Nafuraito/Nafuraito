@@ -99,7 +99,7 @@
   - [X] Integration with page tables
   - [X] Helper functions for MMIO, framebuffer, etc.
 - [X] Copy-on-Write (CoW) implementation
-- [ ] Demand paging
+- [X] Demand paging
 - [ ] Memory-mapped files
 - [ ] Guard pages for stack overflow detection
 

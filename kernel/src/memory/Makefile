@@ -12,6 +12,7 @@ CODE_FILES = lib.rs \
 			 paging.rs \
 			 pat.rs \
 			 cow.rs \
+			 demand_paging.rs \
 			 mod.rs
 
 .PHONY: all clean
