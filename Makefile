@@ -57,11 +57,11 @@ disk_image: bootloader kernel
 # Run in QEMU
 run: all
 # run with 1 gig of RAM  
-	qemu-system-x86_64 -m 512M -drive file=$(BUILD_DIR)/disk.img,format=raw -boot c -enable-kvm -smp 1 -net nic -net user
+	qemu-system-x86_64 -m 1024M -drive file=$(BUILD_DIR)/disk.img,format=raw -boot c -enable-kvm -smp 1 -net nic -net user
 
 # Run with debug output
 run-debug: all
-	qemu-system-x86_64 -m 512M -drive file=$(BUILD_DIR)/disk.img,format=raw -boot c -enable-kvm -smp 1 -net nic -net user -serial stdio -display none
+	qemu-system-x86_64 -m 1024M -drive file=$(BUILD_DIR)/disk.img,format=raw -boot c -enable-kvm -smp 1 -net nic -net user -serial stdio -display none
 
 clean:
 	rm -rf $(BUILD_DIR)

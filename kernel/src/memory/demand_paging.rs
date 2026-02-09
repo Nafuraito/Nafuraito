@@ -52,11 +52,11 @@ fn align_up(addr: u64) -> u64 {
 
 /// Convert a physical address to a virtual address using the identity map.
 ///
-/// This matches the paging module assumption that the first 4 GiB are
+/// This matches the paging module assumption that the first 128 MiB are
 /// identity-mapped for kernel use.
 #[inline]
 unsafe fn phys_to_virt(phys_addr: u64) -> *mut u8 {
-    if phys_addr >= 0x1_0000_0000 {
+    if phys_addr >= 0x8_000_000 {
         ptr::null_mut()
     } else {
         phys_addr as *mut u8
