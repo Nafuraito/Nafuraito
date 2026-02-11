@@ -14,16 +14,32 @@ use super::pmm::alloc_frame;
 /// Maximum number of demand-paged regions we can track without a heap.
 const MAX_REGIONS: usize = 64;
 
-/// Backing source for a demand-paged region.
+/// File-backed read callback used by memory-mapped regions.
 ///
-/// TODO: Only zero-fill is implemented right now; file-backed is a placeholder for
-/// future mmap support.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The callback must read up to `len` bytes at `offset` into `dst` and return
+/// the number of bytes actually read.
+pub type MmapReadAtFn = extern "C" fn(ctx: *mut u8, offset: u64, dst: *mut u8, len: usize) -> usize;
+
+/// File-backed metadata for a demand-paged region.
+#[derive(Clone, Copy, Debug)]
+pub struct FileBacking {
+    /// Opaque context pointer for the filesystem or file object.
+    pub ctx: *mut u8,
+    /// Read-at callback for the file backing.
+    pub read_at: MmapReadAtFn,
+    /// Starting offset in the file for this mapping (must be page-aligned).
+    pub file_offset: u64,
+    /// Total file size in bytes.
+    pub file_size: u64,
+}
+
+/// Backing source for a demand-paged region.
+#[derive(Clone, Copy, Debug)]
 pub enum BackingKind {
     /// Allocate a zeroed page on first access.
     ZeroFill,
-    /// TODO: File-backed pages (future).
-    FileBacked,
+    /// File-backed mapping with demand paging.
+    FileBacked(FileBacking),
 }
 
 /// A demand-paged virtual memory region.
@@ -85,6 +101,8 @@ pub fn register_region(
     }
 
     unsafe {
+        // TODO: Detect overlaps with existing regions instead of allowing
+        // multiple registrations of the same address range.
         for slot in REGIONS.iter_mut() {
             if slot.is_none() {
                 *slot = Some(VmRegion {
@@ -99,6 +117,26 @@ pub fn register_region(
     }
 
     Err("No free region slots")
+}
+
+/// Register a file-backed demand-paged region.
+///
+/// The mapping is registered but pages are loaded lazily on first access.
+///
+/// Notes:
+/// - `file_offset` must be page-aligned.
+/// - `file_size` is used to zero-fill beyond EOF.
+pub fn register_file_region(
+    start: VirtAddr,
+    size: usize,
+    flags: PageTableFlags,
+    file_backing: FileBacking,
+) -> Result<(), &'static str> {
+    if (file_backing.file_offset % PAGE_SIZE as u64) != 0 {
+        return Err("File offset must be page-aligned");
+    }
+
+    register_region(start, size, flags, BackingKind::FileBacked(file_backing))
 }
 
 /// Check whether a faulting address is within a registered region.
@@ -141,8 +179,35 @@ pub fn handle_demand_page_fault(fault_addr: VirtAddr, error_code: u64) -> Result
                 }
                 ptr::write_bytes(virt, 0, PAGE_SIZE);
             }
-            BackingKind::FileBacked => {
-                return Err("File-backed paging not implemented");
+            BackingKind::FileBacked(file) => {
+                let virt = phys_to_virt(phys.as_u64());
+                if virt.is_null() {
+                    // TODO: Provide a temporary kernel mapping for high frames.
+                    return Err("No identity mapping for frame");
+                }
+
+                // Always start with a zeroed page to handle short reads and EOF.
+                ptr::write_bytes(virt, 0, PAGE_SIZE);
+
+                let page_offset = page_base
+                    .checked_sub(region.start)
+                    .ok_or("Fault outside region")?;
+                let file_offset = file
+                    .file_offset
+                    .checked_add(page_offset)
+                    .ok_or("File offset overflow")?;
+
+                if file_offset < file.file_size {
+                    let remaining = (file.file_size - file_offset) as usize;
+                    let to_read = core::cmp::min(PAGE_SIZE, remaining);
+                    let read = (file.read_at)(file.ctx, file_offset, virt, to_read);
+                    if read != to_read {
+                        // TODO: Distinguish short reads from I/O errors once the
+                        // filesystem read API returns error codes.
+                    }
+                }
+
+                // TODO: Track dirty pages for MAP_SHARED-style writeback.
             }
         }
     }

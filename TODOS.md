@@ -100,7 +100,7 @@
   - [X] Helper functions for MMIO, framebuffer, etc.
 - [X] Copy-on-Write (CoW) implementation
 - [X] Demand paging
-- [ ] Memory-mapped files
+- [X] Memory-mapped files (demand-paged file backing)
 - [ ] Guard pages for stack overflow detection
 
 ### Kernel Heap

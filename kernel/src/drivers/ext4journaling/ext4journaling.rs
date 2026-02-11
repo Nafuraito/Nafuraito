@@ -144,6 +144,18 @@ pub const EXT4_N_BLOCKS: usize = 15;
 pub const EXT4_EXT_MAGIC: u16 = 0xF30A;
 pub const EXT4_EXT_MAX_DEPTH: u16 = 5;
 
+// ============== Memory-Mapped File Helpers ==============
+
+/// Scratch buffer size used for mmap read-at operations.
+///
+/// TODO: Support larger block sizes with a dynamic or per-CPU buffer.
+const EXT4_MMAP_SCRATCH_SIZE: usize = 4096;
+
+/// Global scratch buffer for mmap read-at operations.
+///
+/// TODO: Guard with a lock once SMP or preemption is enabled.
+static mut EXT4_MMAP_SCRATCH: [u8; EXT4_MMAP_SCRATCH_SIZE] = [0; EXT4_MMAP_SCRATCH_SIZE];
+
 // ============== Error Types ==============
 
 /// Error codes
@@ -851,6 +863,57 @@ impl Ext4Filesystem {
         }
     }
 
+    /// Read data at a byte offset into a caller-provided buffer.
+    ///
+    /// This avoids heap allocations so it can be used by memory-mapped paging.
+    pub fn read_at_into(
+        &self,
+        inode: &Ext4Inode,
+        offset: u64,
+        dst: &mut [u8],
+    ) -> Ext4Result<usize> {
+        let file_size = inode.size();
+        if offset >= file_size || dst.is_empty() {
+            return Ok(0);
+        }
+
+        let block_size = self.block_size as usize;
+        if block_size == 0 {
+            return Err(Ext4Error::Invalid);
+        }
+        if block_size > EXT4_MMAP_SCRATCH_SIZE {
+            // TODO: Support larger block sizes with a bigger scratch buffer.
+            return Err(Ext4Error::NoMem);
+        }
+
+        let max_len = (file_size - offset) as usize;
+        let to_read = core::cmp::min(dst.len(), max_len);
+
+        let mut total_read = 0usize;
+        while total_read < to_read {
+            let current_offset = offset + total_read as u64;
+            let logical_block = current_offset / self.block_size as u64;
+            let block_offset = (current_offset % self.block_size as u64) as usize;
+            let chunk = core::cmp::min(block_size - block_offset, to_read - total_read);
+
+            let physical_block = self.get_block(inode, logical_block)?;
+            if physical_block == 0 {
+                dst[total_read..total_read + chunk].fill(0);
+            } else if block_offset == 0 && chunk == block_size {
+                self.read_block(physical_block, &mut dst[total_read..total_read + chunk])?;
+            } else {
+                let scratch = unsafe { &mut EXT4_MMAP_SCRATCH };
+                self.read_block(physical_block, &mut scratch[..block_size])?;
+                dst[total_read..total_read + chunk]
+                    .copy_from_slice(&scratch[block_offset..block_offset + chunk]);
+            }
+
+            total_read += chunk;
+        }
+
+        Ok(total_read)
+    }
+
     /// Write a block to the device
     fn write_block(&self, block: u64, buffer: &[u8]) -> Ext4Result<()> {
         if self.readonly {
@@ -1384,6 +1447,72 @@ impl<'a> Ext4FileHandle<'a> {
     /// Get current file position
     pub fn tell(&self) -> u64 {
         self.position
+    }
+
+    /// Read data at an absolute byte offset into a caller buffer.
+    pub fn read_at_into(&self, offset: u64, dst: &mut [u8]) -> Ext4Result<usize> {
+        self.fs.read_at_into(&self.inode, offset, dst)
+    }
+}
+
+/// Memory-mapped file context for ext4.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Ext4MmapFile {
+    fs: *const Ext4Filesystem,
+    inode: Ext4Inode,
+    file_size: u64,
+}
+
+impl Ext4MmapFile {
+    /// File size in bytes.
+    pub fn size(&self) -> u64 {
+        self.file_size
+    }
+
+    /// Read data at an absolute byte offset into a caller buffer.
+    pub fn read_at_into(&self, offset: u64, dst: &mut [u8]) -> Ext4Result<usize> {
+        let fs = unsafe { &*self.fs };
+        fs.read_at_into(&self.inode, offset, dst)
+    }
+}
+
+impl Ext4Filesystem {
+    /// Create a memory-mapped file context from a path.
+    pub fn open_mmap_file(&self, path: &[u8]) -> Ext4Result<Ext4MmapFile> {
+        let inode_num = self.lookup_path(path)?;
+        let inode = self.read_inode(inode_num)?;
+        Ok(Ext4MmapFile {
+            fs: self as *const Ext4Filesystem,
+            inode,
+            file_size: inode.size(),
+        })
+    }
+}
+
+/// Read-at callback for demand-paged mmap regions.
+///
+/// This matches the `MmapReadAtFn` signature in the memory subsystem.
+#[no_mangle]
+pub extern "C" fn ext4_mmap_read_at(
+    ctx: *mut u8,
+    offset: u64,
+    dst: *mut u8,
+    len: usize,
+) -> usize {
+    if ctx.is_null() || dst.is_null() || len == 0 {
+        return 0;
+    }
+
+    let file = unsafe { &*(ctx as *const Ext4MmapFile) };
+    let buffer = unsafe { slice::from_raw_parts_mut(dst, len) };
+
+    match file.read_at_into(offset, buffer) {
+        Ok(read) => read,
+        Err(_) => {
+            // TODO: Propagate error details once mmap uses error-aware callbacks.
+            0
+        }
     }
 }
 

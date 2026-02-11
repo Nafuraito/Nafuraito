@@ -219,7 +219,8 @@ pub use cow::{
 
 mod demand_paging;
 pub use demand_paging::{
-    BackingKind, VmRegion,
+    BackingKind, FileBacking, MmapReadAtFn, VmRegion,
     register_region as demand_register_region,
+    register_file_region as demand_register_file_region,
     handle_demand_page_fault,
 };
