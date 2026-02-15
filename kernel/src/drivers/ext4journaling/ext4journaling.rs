@@ -572,8 +572,10 @@ pub type WriteBlockFn = fn(dev: *mut u8, block: u64, buffer: &[u8]) -> Ext4Resul
 pub type SyncFn = fn(dev: *mut u8) -> Ext4Result<()>;
 
 /// C-compatible block I/O callbacks for kernel integration.
-pub type Ext4ReadBlockC = extern "C" fn(dev: *mut u8, block: u64, buffer: *mut u8, len: usize) -> i32;
-pub type Ext4WriteBlockC = extern "C" fn(dev: *mut u8, block: u64, buffer: *const u8, len: usize) -> i32;
+pub type Ext4ReadBlockC =
+    extern "C" fn(dev: *mut u8, block: u64, buffer: *mut u8, len: usize) -> i32;
+pub type Ext4WriteBlockC =
+    extern "C" fn(dev: *mut u8, block: u64, buffer: *const u8, len: usize) -> i32;
 pub type Ext4SyncC = extern "C" fn(dev: *mut u8) -> i32;
 
 // TODO: Replace this global callback storage with per-mount state.
@@ -591,19 +593,31 @@ pub struct Ext4BlockOps {
 fn read_block_trampoline(dev: *mut u8, block: u64, buffer: &mut [u8]) -> Ext4Result<()> {
     let cb = unsafe { EXT4_C_READ }.ok_or(Ext4Error::Invalid)?;
     let rc = cb(dev, block, buffer.as_mut_ptr(), buffer.len());
-    if rc == 0 { Ok(()) } else { Err(Ext4Error::Io) }
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(Ext4Error::Io)
+    }
 }
 
 fn write_block_trampoline(dev: *mut u8, block: u64, buffer: &[u8]) -> Ext4Result<()> {
     let cb = unsafe { EXT4_C_WRITE }.ok_or(Ext4Error::Invalid)?;
     let rc = cb(dev, block, buffer.as_ptr(), buffer.len());
-    if rc == 0 { Ok(()) } else { Err(Ext4Error::Io) }
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(Ext4Error::Io)
+    }
 }
 
 fn sync_trampoline(dev: *mut u8) -> Ext4Result<()> {
     let cb = unsafe { EXT4_C_SYNC }.ok_or(Ext4Error::Invalid)?;
     let rc = cb(dev);
-    if rc == 0 { Ok(()) } else { Err(Ext4Error::Io) }
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(Ext4Error::Io)
+    }
 }
 
 // ============== Journal Transaction ==============
@@ -1069,8 +1083,7 @@ impl Ext4Filesystem {
         while depth > 0 {
             // Internal node - find the right child
             let idx_ptr = unsafe {
-                (header_ptr as *const u8)
-                    .add(mem::size_of::<Ext4ExtentHeader>())
+                (header_ptr as *const u8).add(mem::size_of::<Ext4ExtentHeader>())
                     as *const Ext4ExtentIdx
             };
 
@@ -1116,8 +1129,7 @@ impl Ext4Filesystem {
             let ee_block = extent.ee_block;
             let ee_len = extent.len();
 
-            if logical_block >= ee_block as u64
-                && logical_block < (ee_block + ee_len as u32) as u64
+            if logical_block >= ee_block as u64 && logical_block < (ee_block + ee_len as u32) as u64
             {
                 let physical_block = extent.start() + (logical_block - ee_block as u64);
                 return Ok(physical_block);
@@ -1602,8 +1614,16 @@ pub extern "C" fn ext4_mount_c(
 
     let ops = Ext4BlockOps {
         read_block: Some(read_block_trampoline),
-        write_block: if write_block.is_some() { Some(write_block_trampoline) } else { None },
-        sync: if sync.is_some() { Some(sync_trampoline) } else { None },
+        write_block: if write_block.is_some() {
+            Some(write_block_trampoline)
+        } else {
+            None
+        },
+        sync: if sync.is_some() {
+            Some(sync_trampoline)
+        } else {
+            None
+        },
     };
 
     match Ext4Filesystem::mount(device, ops) {
@@ -1646,7 +1666,9 @@ pub extern "C" fn ext4_mmap_open_c(
     match fs_ref.open_mmap_file(path_bytes) {
         Ok(file) => {
             if !out_size.is_null() {
-                unsafe { *out_size = file.size(); }
+                unsafe {
+                    *out_size = file.size();
+                }
             }
             Box::into_raw(Box::new(file))
         }

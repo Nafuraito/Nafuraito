@@ -1092,7 +1092,7 @@ pub extern "C" fn enter(
         // Prefer ext4-backed file mapping; fall back to an in-memory blob.
         // TODO: Remove the fallback once a real block device is wired in.
         let mut file_backed_mapped = 0u64;
-        
+
         // TODO: Ext4 mount disabled for now due to linker symbol issues.
         // Using fallback in-memory test blob instead.
         video::print("  EXT4: disabled (linking issues)\n\0");
