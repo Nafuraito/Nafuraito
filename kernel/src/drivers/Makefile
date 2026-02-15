@@ -1,7 +1,7 @@
 # Nafuraito Kernel - Drivers Library
 # Meta-makefile that builds all driver sub-libraries
 
-SUBDIRS = video pic pci
+SUBDIRS = video pic pci ext4journaling
 
 .PHONY: all clean $(SUBDIRS)
 

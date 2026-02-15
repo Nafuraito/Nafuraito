@@ -104,7 +104,7 @@
 - [ ] Guard pages for stack overflow detection
 
 ### Kernel Heap
-- [ ] Simple bump allocator (early boot)
+- [X] Simple bump allocator (early boot)
 - [ ] Slab allocator for kernel objects
 - [ ] General-purpose allocator (`kmalloc`/`kfree`)
 - [ ] Memory pool allocator

@@ -1,20 +1,22 @@
 //! EXT4 Journaling Filesystem Driver
 //!
-//! This module provides a complete EXT4 filesystem driver with journaling (JBD2) 
+//! This module provides a complete EXT4 filesystem driver with journaling (JBD2)
 //! support for the Nafuraito kernel, written entirely in Rust.
 
+#![crate_type = "rlib"]
+#![crate_name = "ext4journaling"]
 #![no_std]
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 
-use core::ptr;
 use core::mem;
+use core::ptr;
 use core::slice;
 
 extern crate alloc;
-use alloc::vec::Vec;
 use alloc::boxed::Box;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 // ============== Memory Allocation Stubs ==============
 // These should be provided by your kernel's memory allocator
@@ -29,13 +31,13 @@ fn kernel_alloc_bytes(size: usize) -> Option<Box<[u8]>> {
     if size == 0 {
         return None;
     }
-    
+
     let ptr = unsafe { kmalloc(size) };
-    
+
     if ptr.is_null() {
         return None;
     }
-    
+
     unsafe {
         // Zero initialize
         ptr::write_bytes(ptr, 0, size);
@@ -570,11 +572,39 @@ pub type ReadBlockFn = fn(dev: *mut u8, block: u64, buffer: &mut [u8]) -> Ext4Re
 pub type WriteBlockFn = fn(dev: *mut u8, block: u64, buffer: &[u8]) -> Ext4Result<()>;
 pub type SyncFn = fn(dev: *mut u8) -> Ext4Result<()>;
 
+/// C-compatible block I/O callbacks for kernel integration.
+pub type Ext4ReadBlockC = extern "C" fn(dev: *mut u8, block: u64, buffer: *mut u8, len: usize) -> i32;
+pub type Ext4WriteBlockC = extern "C" fn(dev: *mut u8, block: u64, buffer: *const u8, len: usize) -> i32;
+pub type Ext4SyncC = extern "C" fn(dev: *mut u8) -> i32;
+
+// TODO: Replace this global callback storage with per-mount state.
+static mut EXT4_C_READ: Option<Ext4ReadBlockC> = None;
+static mut EXT4_C_WRITE: Option<Ext4WriteBlockC> = None;
+static mut EXT4_C_SYNC: Option<Ext4SyncC> = None;
+
 /// Block Device Operations structure
 pub struct Ext4BlockOps {
     pub read_block: Option<ReadBlockFn>,
     pub write_block: Option<WriteBlockFn>,
     pub sync: Option<SyncFn>,
+}
+
+fn read_block_trampoline(dev: *mut u8, block: u64, buffer: &mut [u8]) -> Ext4Result<()> {
+    let cb = unsafe { EXT4_C_READ }.ok_or(Ext4Error::Invalid)?;
+    let rc = cb(dev, block, buffer.as_mut_ptr(), buffer.len());
+    if rc == 0 { Ok(()) } else { Err(Ext4Error::Io) }
+}
+
+fn write_block_trampoline(dev: *mut u8, block: u64, buffer: &[u8]) -> Ext4Result<()> {
+    let cb = unsafe { EXT4_C_WRITE }.ok_or(Ext4Error::Invalid)?;
+    let rc = cb(dev, block, buffer.as_ptr(), buffer.len());
+    if rc == 0 { Ok(()) } else { Err(Ext4Error::Io) }
+}
+
+fn sync_trampoline(dev: *mut u8) -> Ext4Result<()> {
+    let cb = unsafe { EXT4_C_SYNC }.ok_or(Ext4Error::Invalid)?;
+    let rc = cb(dev);
+    if rc == 0 { Ok(()) } else { Err(Ext4Error::Io) }
 }
 
 // ============== Journal Transaction ==============
@@ -706,8 +736,7 @@ impl Ext4Filesystem {
 
     /// Read the superblock
     fn read_superblock(&mut self) -> Ext4Result<()> {
-        let mut buffer = kernel_alloc_bytes(EXT4_MIN_BLOCK_SIZE * 2)
-            .ok_or(Ext4Error::NoMem)?;
+        let mut buffer = kernel_alloc_bytes(EXT4_MIN_BLOCK_SIZE * 2).ok_or(Ext4Error::NoMem)?;
 
         // Read first two blocks (2KB) to get superblock
         if let Some(read_fn) = self.ops.read_block {
@@ -717,12 +746,13 @@ impl Ext4Filesystem {
         }
 
         // Copy superblock from offset 1024
-        let sb_bytes = &buffer[EXT4_SUPERBLOCK_OFFSET..EXT4_SUPERBLOCK_OFFSET + mem::size_of::<Ext4Superblock>()];
+        let sb_bytes = &buffer
+            [EXT4_SUPERBLOCK_OFFSET..EXT4_SUPERBLOCK_OFFSET + mem::size_of::<Ext4Superblock>()];
         unsafe {
             ptr::copy_nonoverlapping(
                 sb_bytes.as_ptr(),
                 &mut *self.superblock as *mut Ext4Superblock as *mut u8,
-                mem::size_of::<Ext4Superblock>()
+                mem::size_of::<Ext4Superblock>(),
             );
         }
 
@@ -740,7 +770,7 @@ impl Ext4Filesystem {
         // Handle 64-bit block counts
         if (self.superblock.s_feature_incompat & EXT4_FEATURE_INCOMPAT_64BIT) != 0 {
             self.use_64bit = true;
-            self.total_blocks = ((self.superblock.s_blocks_count_hi as u64) << 32) 
+            self.total_blocks = ((self.superblock.s_blocks_count_hi as u64) << 32)
                 | self.superblock.s_blocks_count_lo as u64;
             self.desc_size = self.superblock.s_desc_size as u32;
             if self.desc_size < 32 {
@@ -753,11 +783,12 @@ impl Ext4Filesystem {
         }
 
         // Calculate group count
-        self.group_count = ((self.total_blocks + self.blocks_per_group as u64 - 1) 
+        self.group_count = ((self.total_blocks + self.blocks_per_group as u64 - 1)
             / self.blocks_per_group as u64) as u32;
 
         // Check for extent support
-        self.use_extents = (self.superblock.s_feature_incompat & EXT4_FEATURE_INCOMPAT_EXTENTS) != 0;
+        self.use_extents =
+            (self.superblock.s_feature_incompat & EXT4_FEATURE_INCOMPAT_EXTENTS) != 0;
 
         Ok(())
     }
@@ -767,11 +798,14 @@ impl Ext4Filesystem {
         let desc_per_block = self.block_size / self.desc_size;
         let desc_blocks = (self.group_count + desc_per_block - 1) / desc_per_block;
 
-        let mut buffer = kernel_alloc_bytes(self.block_size as usize)
-            .ok_or(Ext4Error::NoMem)?;
+        let mut buffer = kernel_alloc_bytes(self.block_size as usize).ok_or(Ext4Error::NoMem)?;
 
         // Group descriptors start at block 1 (for 1K blocks) or block 1 (for larger blocks)
-        let desc_start = if self.block_size == EXT4_MIN_BLOCK_SIZE { 2 } else { 1 };
+        let desc_start = if self.block_size == EXT4_MIN_BLOCK_SIZE {
+            2
+        } else {
+            1
+        };
 
         for i in 0..desc_blocks {
             self.read_block(desc_start + i as u64, &mut buffer)?;
@@ -788,7 +822,7 @@ impl Ext4Filesystem {
                     ptr::copy_nonoverlapping(
                         buffer[offset..].as_ptr(),
                         &mut desc as *mut Ext4GroupDesc as *mut u8,
-                        mem::size_of::<Ext4GroupDesc>().min(self.desc_size as usize)
+                        mem::size_of::<Ext4GroupDesc>().min(self.desc_size as usize),
                     );
                 }
                 self.group_descs.push(desc);
@@ -815,8 +849,7 @@ impl Ext4Filesystem {
         }
 
         // Read journal superblock
-        let mut buffer = kernel_alloc_bytes(self.block_size as usize)
-            .ok_or(Ext4Error::NoMem)?;
+        let mut buffer = kernel_alloc_bytes(self.block_size as usize).ok_or(Ext4Error::NoMem)?;
         self.read_block(journal_start, &mut buffer)?;
 
         let mut jbd2_sb = Jbd2Superblock::default();
@@ -824,7 +857,7 @@ impl Ext4Filesystem {
             ptr::copy_nonoverlapping(
                 buffer.as_ptr(),
                 &mut jbd2_sb as *mut Jbd2Superblock as *mut u8,
-                mem::size_of::<Jbd2Superblock>()
+                mem::size_of::<Jbd2Superblock>(),
             );
         }
 
@@ -952,8 +985,7 @@ impl Ext4Filesystem {
         let block = inode_table + ((index * self.inode_size) / self.block_size) as u64;
         let offset = ((index * self.inode_size) % self.block_size) as usize;
 
-        let mut buffer = kernel_alloc_bytes(self.block_size as usize)
-            .ok_or(Ext4Error::NoMem)?;
+        let mut buffer = kernel_alloc_bytes(self.block_size as usize).ok_or(Ext4Error::NoMem)?;
         self.read_block(block, &mut buffer)?;
 
         let mut inode = Ext4Inode::default();
@@ -961,7 +993,7 @@ impl Ext4Filesystem {
             ptr::copy_nonoverlapping(
                 buffer[offset..].as_ptr(),
                 &mut inode as *mut Ext4Inode as *mut u8,
-                mem::size_of::<Ext4Inode>()
+                mem::size_of::<Ext4Inode>(),
             );
         }
 
@@ -990,15 +1022,14 @@ impl Ext4Filesystem {
         let block = inode_table + ((index * self.inode_size) / self.block_size) as u64;
         let offset = ((index * self.inode_size) % self.block_size) as usize;
 
-        let mut buffer = kernel_alloc_bytes(self.block_size as usize)
-            .ok_or(Ext4Error::NoMem)?;
+        let mut buffer = kernel_alloc_bytes(self.block_size as usize).ok_or(Ext4Error::NoMem)?;
         self.read_block(block, &mut buffer)?;
 
         unsafe {
             ptr::copy_nonoverlapping(
                 inode as *const Ext4Inode as *const u8,
                 buffer[offset..].as_mut_ptr(),
-                mem::size_of::<Ext4Inode>()
+                mem::size_of::<Ext4Inode>(),
             );
         }
 
@@ -1010,8 +1041,7 @@ impl Ext4Filesystem {
     fn write_block_journaled(&mut self, block: u64, data: &[u8]) -> Ext4Result<()> {
         if let Some(ref mut journal) = self.journal {
             if journal.running {
-                let data_copy = kernel_alloc_bytes(data.len())
-                    .ok_or(Ext4Error::NoMem)?;
+                let data_copy = kernel_alloc_bytes(data.len()).ok_or(Ext4Error::NoMem)?;
                 journal.add_block(block, data_copy)?;
                 return Ok(());
             }
@@ -1035,7 +1065,10 @@ impl Ext4Filesystem {
 
         while depth > 0 {
             // Internal node - find the right child
-            let idx_ptr = unsafe { (header_ptr as *const u8).add(mem::size_of::<Ext4ExtentHeader>()) as *const Ext4ExtentIdx };
+            let idx_ptr = unsafe {
+                (header_ptr as *const u8).add(mem::size_of::<Ext4ExtentHeader>())
+                    as *const Ext4ExtentIdx
+            };
             let indices = unsafe { slice::from_raw_parts(idx_ptr, header.eh_entries as usize) };
 
             let mut best: Option<&Ext4ExtentIdx> = None;
@@ -1051,8 +1084,8 @@ impl Ext4Filesystem {
             let physical_block = best_idx.leaf();
 
             // Read the child block
-            let mut buffer = kernel_alloc_bytes(self.block_size as usize)
-                .ok_or(Ext4Error::NoMem)?;
+            let mut buffer =
+                kernel_alloc_bytes(self.block_size as usize).ok_or(Ext4Error::NoMem)?;
             self.read_block(physical_block, &mut buffer)?;
 
             let new_header_ptr = buffer.as_ptr() as *const Ext4ExtentHeader;
@@ -1062,18 +1095,21 @@ impl Ext4Filesystem {
         }
 
         // Leaf node - find the extent
-        let buffer = buffer_opt.as_ref()
+        let buffer = buffer_opt
+            .as_ref()
             .map(|b| b.as_ptr())
             .unwrap_or(&inode.i_block as *const u32 as *const u8);
-        
-        let extent_ptr = unsafe { buffer.add(mem::size_of::<Ext4ExtentHeader>()) as *const Ext4Extent };
+
+        let extent_ptr =
+            unsafe { buffer.add(mem::size_of::<Ext4ExtentHeader>()) as *const Ext4Extent };
         let extents = unsafe { slice::from_raw_parts(extent_ptr, header.eh_entries as usize) };
 
         for extent in extents {
             let ee_block = extent.ee_block;
             let ee_len = extent.len();
 
-            if logical_block >= ee_block as u64 && logical_block < (ee_block + ee_len as u32) as u64 {
+            if logical_block >= ee_block as u64 && logical_block < (ee_block + ee_len as u32) as u64
+            {
                 let physical_block = extent.start() + (logical_block - ee_block as u64);
                 return Ok(physical_block);
             }
@@ -1093,8 +1129,7 @@ impl Ext4Filesystem {
 
         let mut logical_block = logical_block - EXT4_NDIR_BLOCKS as u64;
 
-        let mut buffer = kernel_alloc_bytes(self.block_size as usize)
-            .ok_or(Ext4Error::NoMem)?;
+        let mut buffer = kernel_alloc_bytes(self.block_size as usize).ok_or(Ext4Error::NoMem)?;
 
         // Single indirect
         if logical_block < ptrs_per_block {
@@ -1114,7 +1149,7 @@ impl Ext4Filesystem {
                 slice::from_raw_parts(buffer.as_ptr() as *const u32, ptrs_per_block as usize)
             };
             let ind_block = ptrs[(logical_block / ptrs_per_block) as usize];
-            
+
             self.read_block(ind_block as u64, &mut buffer)?;
             let ptrs = unsafe {
                 slice::from_raw_parts(buffer.as_ptr() as *const u32, ptrs_per_block as usize)
@@ -1202,8 +1237,7 @@ impl Ext4Filesystem {
         let dir_size = dir_inode.size();
         let mut offset = 0u64;
 
-        let mut buffer = kernel_alloc_bytes(self.block_size as usize)
-            .ok_or(Ext4Error::NoMem)?;
+        let mut buffer = kernel_alloc_bytes(self.block_size as usize).ok_or(Ext4Error::NoMem)?;
 
         while offset < dir_size {
             let logical_block = offset / self.block_size as u64;
@@ -1264,7 +1298,7 @@ impl Ext4Filesystem {
     /// Get filesystem statistics
     pub fn statfs(&self) -> Ext4FsStats {
         let free_blocks = if self.use_64bit {
-            ((self.superblock.s_free_blocks_count_hi as u64) << 32) 
+            ((self.superblock.s_free_blocks_count_hi as u64) << 32)
                 | self.superblock.s_free_blocks_count_lo as u64
         } else {
             self.superblock.s_free_blocks_count_lo as u64
@@ -1283,9 +1317,9 @@ impl Ext4Filesystem {
         if let Some(ref mut journal) = self.journal {
             if let Some(trans) = journal.current_transaction.take() {
                 // Write descriptor block
-                let mut desc_buffer = kernel_alloc_bytes(self.block_size as usize)
-                    .ok_or(Ext4Error::NoMem)?;
-                
+                let mut desc_buffer =
+                    kernel_alloc_bytes(self.block_size as usize).ok_or(Ext4Error::NoMem)?;
+
                 let header = Jbd2Header {
                     h_magic: JBD2_MAGIC_NUMBER,
                     h_blocktype: JBD2_DESCRIPTOR_BLOCK,
@@ -1296,7 +1330,7 @@ impl Ext4Filesystem {
                     ptr::copy_nonoverlapping(
                         &header as *const Jbd2Header as *const u8,
                         desc_buffer.as_mut_ptr(),
-                        mem::size_of::<Jbd2Header>()
+                        mem::size_of::<Jbd2Header>(),
                     );
                 }
 
@@ -1320,13 +1354,13 @@ impl Ext4Filesystem {
                     h_sequence: trans.tid,
                 };
 
-                let mut commit_buffer = kernel_alloc_bytes(self.block_size as usize)
-                    .ok_or(Ext4Error::NoMem)?;
+                let mut commit_buffer =
+                    kernel_alloc_bytes(self.block_size as usize).ok_or(Ext4Error::NoMem)?;
                 unsafe {
                     ptr::copy_nonoverlapping(
                         &commit_header as *const Jbd2Header as *const u8,
                         commit_buffer.as_mut_ptr(),
-                        mem::size_of::<Jbd2Header>()
+                        mem::size_of::<Jbd2Header>(),
                     );
                 }
                 self.write_block(journal.journal_start + journal_block, &commit_buffer)?;
@@ -1396,8 +1430,8 @@ impl<'a> Ext4FileHandle<'a> {
             size = remaining as usize;
         }
 
-        let mut block_buffer = kernel_alloc_bytes(self.fs.block_size as usize)
-            .ok_or(Ext4Error::NoMem)?;
+        let mut block_buffer =
+            kernel_alloc_bytes(self.fs.block_size as usize).ok_or(Ext4Error::NoMem)?;
 
         let mut total_read = 0;
         let mut buf_offset = 0;
@@ -1494,12 +1528,7 @@ impl Ext4Filesystem {
 ///
 /// This matches the `MmapReadAtFn` signature in the memory subsystem.
 #[no_mangle]
-pub extern "C" fn ext4_mmap_read_at(
-    ctx: *mut u8,
-    offset: u64,
-    dst: *mut u8,
-    len: usize,
-) -> usize {
+pub extern "C" fn ext4_mmap_read_at(ctx: *mut u8, offset: u64, dst: *mut u8, len: usize) -> usize {
     if ctx.is_null() || dst.is_null() || len == 0 {
         return 0;
     }
@@ -1513,6 +1542,95 @@ pub extern "C" fn ext4_mmap_read_at(
             // TODO: Propagate error details once mmap uses error-aware callbacks.
             0
         }
+    }
+}
+
+// ============== C-Compatible Mount + mmap Helpers ==============
+
+/// Mount an EXT4 filesystem with C-compatible block I/O callbacks.
+///
+/// Returns a pointer to an `Ext4Filesystem` on success, or null on failure.
+///
+/// TODO: Add proper error codes for mount failures.
+#[no_mangle]
+pub extern "C" fn ext4_mount_c(
+    device: *mut u8,
+    read_block: Option<Ext4ReadBlockC>,
+    write_block: Option<Ext4WriteBlockC>,
+    sync: Option<Ext4SyncC>,
+) -> *mut Ext4Filesystem {
+    if read_block.is_none() {
+        return ptr::null_mut();
+    }
+
+    unsafe {
+        EXT4_C_READ = read_block;
+        EXT4_C_WRITE = write_block;
+        EXT4_C_SYNC = sync;
+    }
+
+    let ops = Ext4BlockOps {
+        read_block: Some(read_block_trampoline),
+        write_block: if write_block.is_some() { Some(write_block_trampoline) } else { None },
+        sync: if sync.is_some() { Some(sync_trampoline) } else { None },
+    };
+
+    match Ext4Filesystem::mount(device, ops) {
+        Ok(fs) => Box::into_raw(Box::new(fs)),
+        Err(_) => ptr::null_mut(),
+    }
+}
+
+/// Unmount and free an EXT4 filesystem context.
+#[no_mangle]
+pub extern "C" fn ext4_unmount_c(fs: *mut Ext4Filesystem) {
+    if fs.is_null() {
+        return;
+    }
+    unsafe {
+        drop(Box::from_raw(fs));
+    }
+}
+
+/// Open a file for demand-paged mmap access.
+///
+/// Returns a pointer to `Ext4MmapFile` on success, or null on failure.
+/// On success, writes the file size to `out_size` if non-null.
+///
+/// TODO: Validate UTF-8 paths once a kernel path API exists.
+#[no_mangle]
+pub extern "C" fn ext4_mmap_open_c(
+    fs: *const Ext4Filesystem,
+    path: *const u8,
+    path_len: usize,
+    out_size: *mut u64,
+) -> *mut Ext4MmapFile {
+    if fs.is_null() || path.is_null() || path_len == 0 {
+        return ptr::null_mut();
+    }
+
+    let fs_ref = unsafe { &*fs };
+    let path_bytes = unsafe { slice::from_raw_parts(path, path_len) };
+
+    match fs_ref.open_mmap_file(path_bytes) {
+        Ok(file) => {
+            if !out_size.is_null() {
+                unsafe { *out_size = file.size(); }
+            }
+            Box::into_raw(Box::new(file))
+        }
+        Err(_) => ptr::null_mut(),
+    }
+}
+
+/// Close and free a file mapping context.
+#[no_mangle]
+pub extern "C" fn ext4_mmap_close_c(file: *mut Ext4MmapFile) {
+    if file.is_null() {
+        return;
+    }
+    unsafe {
+        drop(Box::from_raw(file));
     }
 }
 
@@ -1550,8 +1668,7 @@ impl<'a> Ext4DirIterator<'a> {
 
     /// Read the next directory entry
     pub fn read(&mut self) -> Ext4Result<Ext4DirEntry> {
-        let mut buffer = kernel_alloc_bytes(self.fs.block_size as usize)
-            .ok_or(Ext4Error::NoMem)?;
+        let mut buffer = kernel_alloc_bytes(self.fs.block_size as usize).ok_or(Ext4Error::NoMem)?;
 
         while self.position < self.size {
             let logical_block = self.position / self.fs.block_size as u64;

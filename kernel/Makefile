@@ -23,11 +23,12 @@ MEMORY_DIR = src/memory
 LIBVIDEO = $(BUILD_DIR)/drivers/video/libvideo.a
 LIBPIC = $(BUILD_DIR)/drivers/pic/libpic.a
 LIBPCI = $(BUILD_DIR)/drivers/pci/libpci.a
+LIBEXT4 = $(BUILD_DIR)/drivers/ext4journaling/libext4journaling.a
 LIBGDT = $(BUILD_DIR)/gdt/libgdt.a
 LIBIDT = $(BUILD_DIR)/idt/libidt.a
 LIBMEMORY = $(BUILD_DIR)/memory/libmemory.a
 
-ALL_LIBS = $(LIBVIDEO) $(LIBPIC) $(LIBPCI) $(LIBGDT) $(LIBIDT) $(LIBMEMORY)
+ALL_LIBS = $(LIBVIDEO) $(LIBPIC) $(LIBPCI) $(LIBEXT4) $(LIBGDT) $(LIBIDT) $(LIBMEMORY)
 
 .PHONY: all clean libs drivers gdt idt memory compile
 
@@ -61,6 +62,7 @@ compile: libs
 		$(LIBIDT) \
 		$(LIBPIC) \
 		$(LIBPCI) \
+		$(LIBEXT4) \
 		$(LIBMEMORY) \
 		-o $(ROOT_BUILD_DIR)/kernel.bin
 

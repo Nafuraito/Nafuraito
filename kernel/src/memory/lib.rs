@@ -17,10 +17,8 @@
 
 mod e820;
 pub use e820::{
-    E820Type, E820Entry, E820EntryExtended, MemoryMap, 
-    MEMORY_MAP_ADDR, MAX_MEMORY_ENTRIES,
-    MemoryZone, NumaNode,
-    DMA_ZONE_END, DMA32_ZONE_END, MAX_NUMA_NODES,
+    E820Entry, E820EntryExtended, E820Type, MemoryMap, MemoryZone, NumaNode, DMA32_ZONE_END,
+    DMA_ZONE_END, MAX_MEMORY_ENTRIES, MAX_NUMA_NODES, MEMORY_MAP_ADDR,
 };
 
 // =============================================================================
@@ -33,7 +31,10 @@ pub(crate) struct MemoryMapStorage {
 }
 
 pub(crate) static mut MEMORY_MAP_STORAGE: MemoryMapStorage = MemoryMapStorage {
-    map: MemoryMap { entries_ptr: core::ptr::null(), count: 0 },
+    map: MemoryMap {
+        entries_ptr: core::ptr::null(),
+        count: 0,
+    },
     initialized: false,
 };
 
@@ -116,7 +117,11 @@ pub struct MemoryError {
 impl MemoryError {
     /// Create a new memory error
     pub const fn new(code: u32, message: &'static str, fatal: bool) -> Self {
-        Self { code, message, fatal }
+        Self {
+            code,
+            message,
+            fatal,
+        }
     }
 }
 
@@ -132,18 +137,13 @@ impl From<MemoryError> for &'static str {
 
 mod pmm;
 pub use pmm::{
-    PhysicalMemoryManager, ZoneStats, NumaStats, AllocFlags,
-    alloc_frame, free_frame, pmm_init,
-    pmm_init_c, pmm_alloc_frame, pmm_free_frame,
-    pmm_free_memory, pmm_used_memory, pmm_total_memory,
-    pmm_free_frame_count, pmm_used_frame_count,
-    pmm_is_initialized, pmm_is_frame_used,
-    pmm_alloc_frame_in_zone, pmm_alloc_dma_frame, pmm_alloc_dma32_frame,
-    pmm_zone_free_memory, pmm_zone_total_memory,
-    pmm_alloc_frame_numa, pmm_numa_node_count,
-    pmm_numa_free_memory, pmm_numa_total_memory,
-    pmm_alloc_frames_contiguous, pmm_free_frames_contiguous,
-    pmm_memory_usage_percent, pmm_is_memory_critical,
+    alloc_frame, free_frame, pmm_alloc_dma32_frame, pmm_alloc_dma_frame, pmm_alloc_frame,
+    pmm_alloc_frame_in_zone, pmm_alloc_frame_numa, pmm_alloc_frames_contiguous, pmm_free_frame,
+    pmm_free_frame_count, pmm_free_frames_contiguous, pmm_free_memory, pmm_init, pmm_init_c,
+    pmm_is_frame_used, pmm_is_initialized, pmm_is_memory_critical, pmm_memory_usage_percent,
+    pmm_numa_free_memory, pmm_numa_node_count, pmm_numa_total_memory, pmm_total_memory,
+    pmm_used_frame_count, pmm_used_memory, pmm_zone_free_memory, pmm_zone_total_memory, AllocFlags,
+    NumaStats, PhysicalMemoryManager, ZoneStats,
 };
 
 // =============================================================================
@@ -152,27 +152,16 @@ pub use pmm::{
 
 mod paging;
 pub use paging::{
-    PageTableFlags, PageTableEntry, PageTable,
-    PagingMode, PagingManager, VirtAddr, PhysAddr,
-    check_la57_support, check_nx_support,
-    is_la57_enabled, enable_la57, disable_la57,
-    read_cr3, write_cr3, read_cr4, write_cr4,
-    invlpg, flush_tlb,
-    paging_init, get_paging_manager,
-    map_page, unmap_page, translate_address,
-    identity_map_range, get_current_page_table,
-    switch_page_table, create_page_table,
-    map_range, unmap_range, remap_page, change_page_flags,
-    paging_check_la57_support, paging_check_nx_support,
-    paging_is_la57_enabled, paging_read_cr3,
-    paging_init_c, paging_get_mode,
-    paging_invlpg, paging_flush_tlb,
-    paging_test_simple,
-    paging_map_page, paging_unmap_page,
-    paging_translate_address, paging_is_mapped,
-    paging_identity_map_range,
-    PAGE_SIZE_2MB, PAGE_SIZE_1GB, PAGE_TABLE_ENTRIES,
-    LA48_VIRT_ADDR_BITS, LA57_VIRT_ADDR_BITS,
+    change_page_flags, check_la57_support, check_nx_support, create_page_table, disable_la57,
+    enable_la57, flush_tlb, get_current_page_table, get_paging_manager, identity_map_range, invlpg,
+    is_la57_enabled, map_page, map_range, paging_check_la57_support, paging_check_nx_support,
+    paging_flush_tlb, paging_get_mode, paging_identity_map_range, paging_init, paging_init_c,
+    paging_invlpg, paging_is_la57_enabled, paging_is_mapped, paging_map_page, paging_read_cr3,
+    paging_test_simple, paging_translate_address, paging_unmap_page, read_cr3, read_cr4,
+    remap_page, switch_page_table, translate_address, unmap_page, unmap_range, write_cr3,
+    write_cr4, PageTable, PageTableEntry, PageTableFlags, PagingManager, PagingMode, PhysAddr,
+    VirtAddr, LA48_VIRT_ADDR_BITS, LA57_VIRT_ADDR_BITS, PAGE_SIZE_1GB, PAGE_SIZE_2MB,
+    PAGE_TABLE_ENTRIES,
 };
 
 // Re-export PAGE_SIZE from pmm (it's the standard 4KB page size)
@@ -184,16 +173,10 @@ pub use pmm::PAGE_SIZE;
 
 mod pat;
 pub use pat::{
-    MemoryType, PatConfig, PatManager,
-    check_pat_support, pat_init, get_pat_manager,
-    is_pat_initialized, read_pat,
-    pat_check_support, pat_init_c, pat_is_initialized,
-    pat_get_entry, pat_read_msr,
-    memory_type_to_flags,
-    flags_normal_memory, flags_write_through,
-    flags_uncacheable, flags_write_combining,
-    flags_write_protected,
-    IA32_PAT_MSR,
+    check_pat_support, flags_normal_memory, flags_uncacheable, flags_write_combining,
+    flags_write_protected, flags_write_through, get_pat_manager, is_pat_initialized,
+    memory_type_to_flags, pat_check_support, pat_get_entry, pat_init, pat_init_c,
+    pat_is_initialized, pat_read_msr, read_pat, MemoryType, PatConfig, PatManager, IA32_PAT_MSR,
 };
 
 // =============================================================================
@@ -201,16 +184,26 @@ pub use pat::{
 // =============================================================================
 mod cow;
 pub use cow::{
-    COW_BIT,
-    init as cow_init,
-    get_refcount, inc_refcount, dec_refcount, set_refcount,
-    is_cow_page, mark_cow, mark_cow_range,
-    handle_cow_fault,
-    share_page_cow, clone_range_cow, unshare_cow_page,
+    clone_range_cow,
+    cow_clone_range,
+    cow_get_refcount,
+    cow_handle_fault,
     // C-compatible wrappers
     cow_init as cow_init_c,
-    cow_mark_page, cow_handle_fault,
-    cow_get_refcount, cow_share_page, cow_clone_range,
+    cow_mark_page,
+    cow_share_page,
+    dec_refcount,
+    get_refcount,
+    handle_cow_fault,
+    inc_refcount,
+    init as cow_init,
+    is_cow_page,
+    mark_cow,
+    mark_cow_range,
+    set_refcount,
+    share_page_cow,
+    unshare_cow_page,
+    COW_BIT,
 };
 
 // =============================================================================
@@ -219,8 +212,65 @@ pub use cow::{
 
 mod demand_paging;
 pub use demand_paging::{
+    handle_demand_page_fault, mmap, mmap_file, munmap,
+    register_file_region as demand_register_file_region, register_region as demand_register_region,
     BackingKind, FileBacking, MmapReadAtFn, VmRegion,
-    register_region as demand_register_region,
-    register_file_region as demand_register_file_region,
-    handle_demand_page_fault,
 };
+
+// =============================================================================
+// C-Compatible mmap/munmap wrappers
+// =============================================================================
+
+/// Create a demand-paged anonymous mapping (C-compatible).
+///
+/// Returns the mapped base address on success, or 0 on failure.
+#[no_mangle]
+pub extern "C" fn memory_mmap_zero(start: u64, size: usize, flags: u64) -> u64 {
+    let virt = VirtAddr::new(start);
+    let map_flags = PageTableFlags::from_raw(flags);
+
+    match mmap(virt, size, map_flags, BackingKind::ZeroFill) {
+        Ok(mapped) => mapped.as_u64(),
+        Err(_) => 0,
+    }
+}
+
+/// Create a demand-paged file mapping (C-compatible).
+///
+/// Returns the mapped base address on success, or 0 on failure.
+#[no_mangle]
+pub extern "C" fn memory_mmap_file(
+    start: u64,
+    size: usize,
+    flags: u64,
+    ctx: *mut u8,
+    read_at: MmapReadAtFn,
+    file_offset: u64,
+    file_size: u64,
+) -> u64 {
+    let virt = VirtAddr::new(start);
+    let map_flags = PageTableFlags::from_raw(flags);
+    let backing = FileBacking {
+        ctx,
+        read_at,
+        file_offset,
+        file_size,
+    };
+
+    match mmap_file(virt, size, map_flags, backing) {
+        Ok(mapped) => mapped.as_u64(),
+        Err(_) => 0,
+    }
+}
+
+/// Unmap a demand-paged region (C-compatible).
+///
+/// Returns 0 on success, -1 on failure.
+#[no_mangle]
+pub extern "C" fn memory_munmap(start: u64, size: usize) -> i32 {
+    let virt = VirtAddr::new(start);
+    match munmap(virt, size) {
+        Ok(_) => 0,
+        Err(_) => -1,
+    }
+}

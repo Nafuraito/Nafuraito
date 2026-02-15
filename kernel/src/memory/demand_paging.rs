@@ -8,8 +8,10 @@
 
 use core::ptr;
 
-use super::paging::{map_page, PageTableFlags, PhysAddr, VirtAddr, PAGE_SIZE};
-use super::pmm::alloc_frame;
+use super::paging::{
+    map_page, translate_address, unmap_page, PageTableFlags, PhysAddr, VirtAddr, PAGE_SIZE,
+};
+use super::pmm::{alloc_frame, free_frame};
 
 /// Maximum number of demand-paged regions we can track without a heap.
 const MAX_REGIONS: usize = 64;
@@ -51,7 +53,8 @@ pub struct VmRegion {
     pub backing: BackingKind,
 }
 
-/// TODO: Global region table (simple fixed-size registry).
+/// TODO: Replace this fixed-size registry with a proper VM region tree once a heap exists.
+/// TODO: Add synchronization for multi-core access (spinlock or per-CPU regions).
 static mut REGIONS: [Option<VmRegion>; MAX_REGIONS] = [None; MAX_REGIONS];
 
 /// Align an address down to a page boundary.
@@ -66,10 +69,17 @@ fn align_up(addr: u64) -> u64 {
     (addr + PAGE_SIZE as u64 - 1) & !(PAGE_SIZE as u64 - 1)
 }
 
+/// Check if two ranges overlap.
+#[inline]
+fn ranges_overlap(a_start: u64, a_end: u64, b_start: u64, b_end: u64) -> bool {
+    a_start < b_end && b_start < a_end
+}
+
 /// Convert a physical address to a virtual address using the identity map.
 ///
 /// This matches the paging module assumption that the first 128 MiB are
 /// identity-mapped for kernel use.
+/// TODO: Provide a temporary kernel mapping for frames outside the identity map.
 #[inline]
 unsafe fn phys_to_virt(phys_addr: u64) -> *mut u8 {
     if phys_addr >= 0x8_000_000 {
@@ -139,6 +149,89 @@ pub fn register_file_region(
     register_region(start, size, flags, BackingKind::FileBacked(file_backing))
 }
 
+/// Create a demand-paged mapping for a virtual range.
+///
+/// The region is registered and pages are populated lazily on first access.
+///
+/// TODO: Integrate a virtual address allocator so callers can pass 0 to pick a free range.
+pub fn mmap(
+    start: VirtAddr,
+    size: usize,
+    flags: PageTableFlags,
+    backing: BackingKind,
+) -> Result<VirtAddr, &'static str> {
+    if size == 0 {
+        return Err("Invalid region size");
+    }
+
+    // Validate file backing constraints before proceeding
+    if let BackingKind::FileBacked(file) = backing {
+        if (file.file_offset % PAGE_SIZE as u64) != 0 {
+            return Err("File offset must be page-aligned");
+        }
+    }
+
+    // Align region boundaries to page size
+    let start_addr = align_down(start.as_u64());
+    let end_addr = align_up(
+        start
+            .as_u64()
+            .checked_add(size as u64)
+            .ok_or("Size overflow")?,
+    );
+
+    // Ensure the aligned range is valid
+    if end_addr <= start_addr {
+        return Err("Invalid region size");
+    }
+
+    unsafe {
+        // Check for overlaps with existing registered regions
+        for slot in &REGIONS {
+            if let Some(region) = slot {
+                if ranges_overlap(start_addr, end_addr, region.start, region.end) {
+                    return Err("Region overlaps existing mapping");
+                }
+            }
+        }
+
+        // Find a free slot and register the new region
+        for slot in REGIONS.iter_mut() {
+            if slot.is_none() {
+                // Register the virtual memory region with backing source
+                *slot = Some(VmRegion {
+                    start: start_addr,
+                    end: end_addr,
+                    flags,
+                    backing,
+                });
+                return Ok(VirtAddr::new(start_addr));
+            }
+        }
+    }
+
+    Err("No free region slots")
+}
+
+/// Create a demand-paged file mapping for a virtual range.
+///
+/// This is a convenience wrapper around `mmap()` that validates file offset
+/// alignment before delegating to the main mmap function.
+pub fn mmap_file(
+    start: VirtAddr,
+    size: usize,
+    flags: PageTableFlags,
+    file_backing: FileBacking,
+) -> Result<VirtAddr, &'static str> {
+    // Verify file offset is page-aligned for proper lazy loading
+    if (file_backing.file_offset % PAGE_SIZE as u64) != 0 {
+        return Err("File offset must be page-aligned");
+    }
+
+    // Delegate to main mmap with file backing kind
+    mmap(start, size, flags, BackingKind::FileBacked(file_backing))
+}
+
 /// Check whether a faulting address is within a registered region.
 fn find_region(addr: u64) -> Option<VmRegion> {
     unsafe {
@@ -151,6 +244,135 @@ fn find_region(addr: u64) -> Option<VmRegion> {
         }
     }
     None
+}
+
+/// Remove a mapping for a virtual range and free any populated pages.
+///
+/// TODO: Track and free file-backed dirty pages if MAP_SHARED support is added.
+/// TODO: Track large-page mappings; this assumes 4KB pages only.
+pub fn munmap(start: VirtAddr, size: usize) -> Result<(), &'static str> {
+    if size == 0 {
+        return Err("Invalid region size");
+    }
+
+    let unmap_start = align_down(start.as_u64());
+    let unmap_end = align_up(
+        start
+            .as_u64()
+            .checked_add(size as u64)
+            .ok_or("Size overflow")?,
+    );
+
+    if unmap_end <= unmap_start {
+        return Err("Invalid region size");
+    }
+
+    let mut has_region = false;
+    unsafe {
+        for slot in &REGIONS {
+            if let Some(region) = slot {
+                if ranges_overlap(unmap_start, unmap_end, region.start, region.end) {
+                    has_region = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if !has_region {
+        return Err("Address not in demand region");
+    }
+
+    // Unmap pages and free physical frames when mapped.
+    let mut addr = unmap_start;
+    while addr < unmap_end {
+        let virt = VirtAddr::new(addr);
+        if let Ok(phys) = translate_address(virt) {
+            unsafe {
+                unmap_page(virt)?;
+            }
+            let frame = phys.align_down().as_u64();
+            free_frame(frame).map_err(|_| "Failed to free frame")?;
+        }
+        addr += PAGE_SIZE as u64;
+    }
+
+    // Update region registry (remove or shrink/split overlapping entries).
+    unsafe {
+        let mut i = 0usize;
+        while i < REGIONS.len() {
+            if let Some(region) = REGIONS[i] {
+                if !ranges_overlap(unmap_start, unmap_end, region.start, region.end) {
+                    i += 1;
+                    continue;
+                }
+
+                if unmap_start <= region.start && unmap_end >= region.end {
+                    REGIONS[i] = None;
+                    i += 1;
+                    continue;
+                }
+
+                if unmap_start <= region.start && unmap_end < region.end {
+                    REGIONS[i] = Some(VmRegion {
+                        start: unmap_end,
+                        end: region.end,
+                        flags: region.flags,
+                        backing: region.backing,
+                    });
+                    i += 1;
+                    continue;
+                }
+
+                if unmap_start > region.start && unmap_end >= region.end {
+                    REGIONS[i] = Some(VmRegion {
+                        start: region.start,
+                        end: unmap_start,
+                        flags: region.flags,
+                        backing: region.backing,
+                    });
+                    i += 1;
+                    continue;
+                }
+
+                // Split the region into two parts.
+                let right = VmRegion {
+                    start: unmap_end,
+                    end: region.end,
+                    flags: region.flags,
+                    backing: region.backing,
+                };
+
+                REGIONS[i] = Some(VmRegion {
+                    start: region.start,
+                    end: unmap_start,
+                    flags: region.flags,
+                    backing: region.backing,
+                });
+
+                let mut inserted = false;
+                for slot in REGIONS.iter_mut() {
+                    if slot.is_none() {
+                        *slot = Some(right);
+                        inserted = true;
+                        break;
+                    }
+                }
+
+                if !inserted {
+                    // TODO: Consider a compaction pass or a region tree to avoid this case.
+                    return Err("No free region slots for split");
+                }
+
+                i += 1;
+                continue;
+            }
+
+            i += 1;
+        }
+    }
+
+    Ok(())
 }
 
 /// Handle a not-present page fault for a demand-paged region.
