@@ -25,12 +25,18 @@
 #![no_std] // We're a kernel - no standard library for us!
 #![no_main] // We define our own entry point (not the usual main())
 #![allow(unused)] // Allow unused code while we're developing
+#![feature(alloc_error_handler)]
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 extern crate alloc;
+
+#[path = "drivers/ata.rs"]
+mod ata;
+
+use ata::{ext4_read_block_ata, ext4_sync_ata, ext4_write_block_ata, EXT4_ATA_DEVICE};
 
 // =============================================================================
 // Serial Debug Output
@@ -186,7 +192,9 @@ pub unsafe extern "C" fn memmove(dest: *mut u8, src: *const u8, n: usize) -> *mu
 const HEAP_SIZE: usize = 256 * 1024;
 
 #[repr(align(16))]
-static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
+struct Heap([u8; HEAP_SIZE]);
+
+static mut HEAP: Heap = Heap([0; HEAP_SIZE]);
 
 static HEAP_OFFSET: AtomicUsize = AtomicUsize::new(0);
 
@@ -211,7 +219,7 @@ unsafe impl GlobalAlloc for BumpAllocator {
                 Ordering::SeqCst,
                 Ordering::Relaxed,
             ) {
-                Ok(_) => return HEAP.as_mut_ptr().add(aligned),
+                Ok(_) => return HEAP.0.as_mut_ptr().add(aligned),
                 Err(prev) => current = prev,
             }
         }
@@ -237,13 +245,169 @@ fn alloc_error(_layout: Layout) -> ! {
 /// Kernel heap allocation entrypoint (used by ext4 journaling).
 #[no_mangle]
 pub extern "C" fn kmalloc(size: usize) -> *mut u8 {
-    unsafe { GLOBAL_ALLOCATOR.alloc(Layout::from_size_align(size, 16).unwrap()) }
+    // Don't unwrap - just create layout directly to avoid Debug trait requirement
+    if let Ok(layout) = Layout::from_size_align(size, 16) {
+        unsafe { GLOBAL_ALLOCATOR.alloc(layout) }
+    } else {
+        core::ptr::null_mut()
+    }
 }
 
 /// Kernel heap free entrypoint (currently a no-op).
 #[no_mangle]
 pub extern "C" fn kfree(_ptr: *mut u8) {
     // TODO: Wire this into the real kernel allocator.
+}
+
+// =============================================================================
+// Allocation Runtime Shims (for nightly alloc library)
+// =============================================================================
+
+/// Called by nightly's alloc library to check if the alloc shim is available.
+#[no_mangle]
+pub extern "C" fn __rust_no_alloc_shim_is_unstable_v2() {
+    // This is a marker function that indicates we handle allocations ourselves.
+    // The alloc library will call this to detect if a custom allocator is set.
+}
+
+/// Direct allocation for nightly alloc library.
+#[no_mangle]
+pub unsafe extern "C" fn __rust_alloc(size: usize, align: usize) -> *mut u8 {
+    let layout = Layout::from_size_align(size, align);
+    match layout {
+        Ok(l) => GLOBAL_ALLOCATOR.alloc(l),
+        Err(_) => core::ptr::null_mut(),
+    }
+}
+
+/// Direct deallocation for nightly alloc library.
+#[no_mangle]
+pub unsafe extern "C" fn __rust_dealloc(ptr: *mut u8, size: usize, align: usize) {
+    let layout = Layout::from_size_align(size, align);
+    if let Ok(l) = layout {
+        GLOBAL_ALLOCATOR.dealloc(ptr, l);
+    }
+}
+
+/// Reallocation for nightly alloc library.
+#[no_mangle]
+pub unsafe extern "C" fn __rust_realloc(
+    ptr: *mut u8,
+    old_size: usize,
+    align: usize,
+    new_size: usize,
+) -> *mut u8 {
+    // Simple realloc: allocate new, copy, free old
+    let new_layout = Layout::from_size_align(new_size, align);
+    if new_layout.is_err() {
+        return core::ptr::null_mut();
+    }
+    let new_ptr = __rust_alloc(new_size, align);
+    if !new_ptr.is_null() {
+        let copy_size = core::cmp::min(old_size, new_size);
+        core::ptr::copy_nonoverlapping(ptr, new_ptr, copy_size);
+        let old_layout = Layout::from_size_align(old_size, align);
+        if let Ok(l) = old_layout {
+            __rust_dealloc(ptr, old_size, align);
+        }
+    }
+    new_ptr
+}
+
+/// Zero-allocating variant for nightly alloc library.
+#[no_mangle]
+pub unsafe extern "C" fn __rust_alloc_zeroed(size: usize, align: usize) -> *mut u8 {
+    let ptr = __rust_alloc(size, align);
+    if !ptr.is_null() {
+        core::ptr::write_bytes(ptr, 0, size);
+    }
+    ptr
+}
+
+// =============================================================================
+// Panicking and Error Handling Runtime Shims
+// =============================================================================
+
+/// Called when division by zero occurs in debug mode.
+#[no_mangle]
+pub fn panic_const_div_by_zero() -> ! {
+    loop {
+        unsafe {
+            core::arch::asm!("hlt");
+        }
+    }
+}
+
+/// Called when a slice index is out of bounds.
+#[no_mangle]
+pub fn slice_index_fail(len: usize, index: usize, _index_type: &str) -> ! {
+    loop {
+        unsafe {
+            core::arch::asm!("hlt");
+        }
+    }
+}
+
+/// Called when bounds checking fails.
+#[no_mangle]
+pub fn panic_bounds_check(_index: usize, _len: usize) -> ! {
+    loop {
+        unsafe {
+            core::arch::asm!("hlt");
+        }
+    }
+}
+
+/// Called when an allocation error occurs (alloc library).
+#[no_mangle]
+pub fn handle_alloc_error(_: core::alloc::Layout) -> ! {
+    loop {
+        unsafe {
+            core::arch::asm!("hlt");
+        }
+    }
+}
+
+/// Called when Vec/Vec reallocation fails.
+#[no_mangle]
+pub fn handle_error(_: core::alloc::Layout) -> ! {
+    loop {
+        unsafe {
+            core::arch::asm!("hlt");
+        }
+    }
+}
+
+/// Called when unwrap fails on an error.
+#[no_mangle]
+pub fn unwrap_failed(msg: &str, _panic_info: &core::panic::Location) -> ! {
+    loop {
+        unsafe {
+            core::arch::asm!("hlt");
+        }
+    }
+}
+
+/// Memory comparison (missing from bare-metal).
+#[no_mangle]
+pub extern "C" fn bcmp(s1: *const u8, s2: *const u8, n: usize) -> i32 {
+    unsafe {
+        for i in 0..n {
+            let a = *s1.add(i);
+            let b = *s2.add(i);
+            if a != b {
+                return (a as i32) - (b as i32);
+            }
+        }
+    }
+    0
+}
+
+/// Formatter write_str (for Debug formatting).
+#[no_mangle]
+pub fn formatter_write_str(_formatter: *mut u8, _s: *const str) -> core::fmt::Result {
+    // Stub - just succeed and do nothing
+    Ok(())
 }
 
 // =============================================================================
@@ -351,6 +515,8 @@ mod memory {
 }
 
 // EXT4 journaling driver (libext4journaling.a)
+// TODO: Re-enable ext4 once linking issues are resolved
+/*
 type Ext4ReadBlockC = extern "C" fn(dev: *mut u8, block: u64, buffer: *mut u8, len: usize) -> i32;
 type Ext4WriteBlockC =
     extern "C" fn(dev: *mut u8, block: u64, buffer: *const u8, len: usize) -> i32;
@@ -377,6 +543,7 @@ mod ext4 {
         pub fn ext4_mmap_read_at(ctx: *mut u8, offset: u64, dst: *mut u8, len: usize) -> usize;
     }
 }
+*/
 
 // PCI library (libpci.a)
 mod pci {
@@ -444,30 +611,9 @@ fn print_hex_u64(num: u64) {
 // =============================================================================
 
 // Small test blob used by the file-backed mmap read_at callback.
-static MMAP_TEST_BLOB: [u8; 32] = *b"MMAP_TEST_DATA_0123456789";
+static MMAP_TEST_BLOB: [u8; 32] = *b"MMAP_TEST_DATA_0123456789_PADPAD";
 
-// TODO: Replace these stubs with a real block device driver.
-extern "C" fn ext4_read_block_stub(
-    _dev: *mut u8,
-    _block: u64,
-    _buffer: *mut u8,
-    _len: usize,
-) -> i32 {
-    -1
-}
-
-extern "C" fn ext4_write_block_stub(
-    _dev: *mut u8,
-    _block: u64,
-    _buffer: *const u8,
-    _len: usize,
-) -> i32 {
-    -1
-}
-
-extern "C" fn ext4_sync_stub(_dev: *mut u8) -> i32 {
-    -1
-}
+// TODO: ext4_mmap_read_at_safe removed - ext4 support disabled
 
 /// Test read_at callback for file-backed demand paging.
 ///
@@ -946,57 +1092,19 @@ pub extern "C" fn enter(
         // Prefer ext4-backed file mapping; fall back to an in-memory blob.
         // TODO: Remove the fallback once a real block device is wired in.
         let mut file_backed_mapped = 0u64;
-        let ext4_fs = unsafe {
-            ext4::ext4_mount_c(
-                core::ptr::null_mut(),
-                Some(ext4_read_block_stub),
-                Some(ext4_write_block_stub),
-                Some(ext4_sync_stub),
-            )
-        };
-
-        if !ext4_fs.is_null() {
-            video::print("  EXT4 mount: OK\n\0");
-            let path = b"/mmap-test.bin";
-            let mut file_size = 0u64;
-            let file = unsafe {
-                ext4::ext4_mmap_open_c(ext4_fs, path.as_ptr(), path.len(), &mut file_size)
-            };
-
-            if file.is_null() {
-                video::print("  EXT4 mmap open: FAILED\n\0");
-                mmap_ok = false;
-            } else {
-                file_backed_mapped = memory::memory_mmap_file(
-                    MMAP_FILE_BASE,
-                    mmap_size,
-                    0x0,
-                    file as *mut u8,
-                    ext4::ext4_mmap_read_at,
-                    0,
-                    file_size,
-                );
-
-                unsafe {
-                    ext4::ext4_mmap_close_c(file);
-                }
-            }
-
-            unsafe {
-                ext4::ext4_unmount_c(ext4_fs);
-            }
-        } else {
-            video::print("  EXT4 mount: SKIPPED (no block device)\n\0");
-            file_backed_mapped = memory::memory_mmap_file(
-                MMAP_FILE_BASE,
-                mmap_size,
-                0x0,
-                (&MMAP_TEST_BLOB as *const [u8; 32]) as *mut u8,
-                mmap_test_read_at,
-                0,
-                MMAP_TEST_BLOB.len() as u64,
-            );
-        }
+        
+        // TODO: Ext4 mount disabled for now due to linker symbol issues.
+        // Using fallback in-memory test blob instead.
+        video::print("  EXT4: disabled (linking issues)\n\0");
+        file_backed_mapped = memory::memory_mmap_file(
+            MMAP_FILE_BASE,
+            mmap_size,
+            0x0,
+            (&MMAP_TEST_BLOB as *const [u8; 32]) as *mut u8,
+            mmap_test_read_at,
+            0,
+            MMAP_TEST_BLOB.len() as u64,
+        );
 
         if file_backed_mapped != 0 {
             video::print("  File-backed mmap: OK at \0");

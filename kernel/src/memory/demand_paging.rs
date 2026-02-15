@@ -98,7 +98,9 @@ pub fn register_region(
     flags: PageTableFlags,
     backing: BackingKind,
 ) -> Result<(), &'static str> {
+    // Align the start to a page boundary for consistent bookkeeping.
     let start_addr = align_down(start.as_u64());
+    // Align the end up to cover partial pages.
     let end_addr = align_up(
         start
             .as_u64()
@@ -106,6 +108,7 @@ pub fn register_region(
             .ok_or("Size overflow")?,
     );
 
+    // Reject invalid ranges after alignment.
     if end_addr <= start_addr {
         return Err("Invalid region size");
     }
@@ -113,8 +116,10 @@ pub fn register_region(
     unsafe {
         // TODO: Detect overlaps with existing regions instead of allowing
         // multiple registrations of the same address range.
+        // Scan for the first free slot in the fixed registry.
         for slot in REGIONS.iter_mut() {
             if slot.is_none() {
+                // Store the region metadata for later demand faults.
                 *slot = Some(VmRegion {
                     start: start_addr,
                     end: end_addr,
@@ -160,12 +165,14 @@ pub fn mmap(
     flags: PageTableFlags,
     backing: BackingKind,
 ) -> Result<VirtAddr, &'static str> {
+    // Zero-length mappings are invalid by design.
     if size == 0 {
         return Err("Invalid region size");
     }
 
     // Validate file backing constraints before proceeding
     if let BackingKind::FileBacked(file) = backing {
+        // File offsets must align to page boundaries.
         if (file.file_offset % PAGE_SIZE as u64) != 0 {
             return Err("File offset must be page-aligned");
         }
@@ -189,6 +196,7 @@ pub fn mmap(
         // Check for overlaps with existing registered regions
         for slot in &REGIONS {
             if let Some(region) = slot {
+                // Reject any overlapping virtual ranges.
                 if ranges_overlap(start_addr, end_addr, region.start, region.end) {
                     return Err("Region overlaps existing mapping");
                 }
@@ -251,10 +259,12 @@ fn find_region(addr: u64) -> Option<VmRegion> {
 /// TODO: Track and free file-backed dirty pages if MAP_SHARED support is added.
 /// TODO: Track large-page mappings; this assumes 4KB pages only.
 pub fn munmap(start: VirtAddr, size: usize) -> Result<(), &'static str> {
+    // Zero-length unmaps are invalid by design.
     if size == 0 {
         return Err("Invalid region size");
     }
 
+    // Align the unmap range to page boundaries.
     let unmap_start = align_down(start.as_u64());
     let unmap_end = align_up(
         start
@@ -263,6 +273,7 @@ pub fn munmap(start: VirtAddr, size: usize) -> Result<(), &'static str> {
             .ok_or("Size overflow")?,
     );
 
+    // Reject invalid ranges after alignment.
     if unmap_end <= unmap_start {
         return Err("Invalid region size");
     }
@@ -286,9 +297,11 @@ pub fn munmap(start: VirtAddr, size: usize) -> Result<(), &'static str> {
     // Unmap pages and free physical frames when mapped.
     let mut addr = unmap_start;
     while addr < unmap_end {
+        // Translate the virtual address to a physical frame if mapped.
         let virt = VirtAddr::new(addr);
         if let Ok(phys) = translate_address(virt) {
             unsafe {
+                // Remove the mapping and free the frame.
                 unmap_page(virt)?;
             }
             let frame = phys.align_down().as_u64();
@@ -302,17 +315,20 @@ pub fn munmap(start: VirtAddr, size: usize) -> Result<(), &'static str> {
         let mut i = 0usize;
         while i < REGIONS.len() {
             if let Some(region) = REGIONS[i] {
+                // Skip regions that do not overlap the unmap range.
                 if !ranges_overlap(unmap_start, unmap_end, region.start, region.end) {
                     i += 1;
                     continue;
                 }
 
+                // Remove regions fully covered by the unmap range.
                 if unmap_start <= region.start && unmap_end >= region.end {
                     REGIONS[i] = None;
                     i += 1;
                     continue;
                 }
 
+                // Shrink the region from the front.
                 if unmap_start <= region.start && unmap_end < region.end {
                     REGIONS[i] = Some(VmRegion {
                         start: unmap_end,
@@ -324,6 +340,7 @@ pub fn munmap(start: VirtAddr, size: usize) -> Result<(), &'static str> {
                     continue;
                 }
 
+                // Shrink the region from the back.
                 if unmap_start > region.start && unmap_end >= region.end {
                     REGIONS[i] = Some(VmRegion {
                         start: region.start,
@@ -353,6 +370,7 @@ pub fn munmap(start: VirtAddr, size: usize) -> Result<(), &'static str> {
                 let mut inserted = false;
                 for slot in REGIONS.iter_mut() {
                     if slot.is_none() {
+                        // Store the right-hand region after the split.
                         *slot = Some(right);
                         inserted = true;
                         break;
@@ -384,7 +402,9 @@ pub fn handle_demand_page_fault(fault_addr: VirtAddr, error_code: u64) -> Result
         return Err("Page was present");
     }
 
+    // Look up the region for the faulting address.
     let region = find_region(fault_addr.as_u64()).ok_or("Address not in demand region")?;
+    // Align the faulting address to the page base.
     let page_base = align_down(fault_addr.as_u64());
 
     // Allocate a physical frame for the new page.
@@ -399,6 +419,7 @@ pub fn handle_demand_page_fault(fault_addr: VirtAddr, error_code: u64) -> Result
                 if virt.is_null() {
                     return Err("No identity mapping for frame");
                 }
+                // Zero-fill anonymous pages on first touch.
                 ptr::write_bytes(virt, 0, PAGE_SIZE);
             }
             BackingKind::FileBacked(file) => {
@@ -439,6 +460,7 @@ pub fn handle_demand_page_fault(fault_addr: VirtAddr, error_code: u64) -> Result
     map_flags.set(PageTableFlags::PRESENT);
 
     unsafe {
+        // Install the new mapping for the faulting page.
         map_page(VirtAddr::new(page_base), phys, map_flags)?;
     }
 

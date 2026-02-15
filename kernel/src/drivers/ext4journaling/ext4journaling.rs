@@ -15,7 +15,6 @@ use core::slice;
 
 extern crate alloc;
 use alloc::boxed::Box;
-use alloc::string::String;
 use alloc::vec::Vec;
 
 // ============== Memory Allocation Stubs ==============
@@ -736,7 +735,9 @@ impl Ext4Filesystem {
 
     /// Read the superblock
     fn read_superblock(&mut self) -> Ext4Result<()> {
-        let mut buffer = kernel_alloc_bytes(EXT4_MIN_BLOCK_SIZE * 2).ok_or(Ext4Error::NoMem)?;
+        // EXT4_MIN_BLOCK_SIZE is u32, but the allocator expects usize.
+        let buffer_size = (EXT4_MIN_BLOCK_SIZE as usize) * 2;
+        let mut buffer = kernel_alloc_bytes(buffer_size).ok_or(Ext4Error::NoMem)?;
 
         // Read first two blocks (2KB) to get superblock
         if let Some(read_fn) = self.ops.read_block {
@@ -1053,8 +1054,10 @@ impl Ext4Filesystem {
 
     /// Get physical block number from extent tree
     fn get_block_from_extent(&self, inode: &Ext4Inode, logical_block: u64) -> Ext4Result<u64> {
-        let header_ptr = &inode.i_block as *const u32 as *const Ext4ExtentHeader;
-        let mut header = unsafe { *header_ptr };
+        // SAFETY: inode is packed; use raw pointers + unaligned reads.
+        let inode_block_ptr = core::ptr::addr_of!(inode.i_block) as *const u8;
+        let mut header_ptr = inode_block_ptr as *const Ext4ExtentHeader;
+        let mut header = unsafe { core::ptr::read_unaligned(header_ptr) };
 
         if header.eh_magic != EXT4_EXT_MAGIC {
             return Err(Ext4Error::Invalid);
@@ -1066,13 +1069,16 @@ impl Ext4Filesystem {
         while depth > 0 {
             // Internal node - find the right child
             let idx_ptr = unsafe {
-                (header_ptr as *const u8).add(mem::size_of::<Ext4ExtentHeader>())
+                (header_ptr as *const u8)
+                    .add(mem::size_of::<Ext4ExtentHeader>())
                     as *const Ext4ExtentIdx
             };
-            let indices = unsafe { slice::from_raw_parts(idx_ptr, header.eh_entries as usize) };
 
-            let mut best: Option<&Ext4ExtentIdx> = None;
-            for idx in indices {
+            // Scan the index entries using unaligned reads.
+            let mut best: Option<Ext4ExtentIdx> = None;
+            let entry_count = header.eh_entries as usize;
+            for i in 0..entry_count {
+                let idx = unsafe { core::ptr::read_unaligned(idx_ptr.add(i)) };
                 if idx.ei_block <= logical_block as u32 {
                     best = Some(idx);
                 } else {
@@ -1088,8 +1094,9 @@ impl Ext4Filesystem {
                 kernel_alloc_bytes(self.block_size as usize).ok_or(Ext4Error::NoMem)?;
             self.read_block(physical_block, &mut buffer)?;
 
-            let new_header_ptr = buffer.as_ptr() as *const Ext4ExtentHeader;
-            header = unsafe { *new_header_ptr };
+            // Update the header pointer to the child node.
+            header_ptr = buffer.as_ptr() as *const Ext4ExtentHeader;
+            header = unsafe { core::ptr::read_unaligned(header_ptr) };
             buffer_opt = Some(buffer);
             depth -= 1;
         }
@@ -1098,17 +1105,19 @@ impl Ext4Filesystem {
         let buffer = buffer_opt
             .as_ref()
             .map(|b| b.as_ptr())
-            .unwrap_or(&inode.i_block as *const u32 as *const u8);
+            .unwrap_or(inode_block_ptr);
 
+        // Walk extents with unaligned reads to avoid UB on packed data.
         let extent_ptr =
             unsafe { buffer.add(mem::size_of::<Ext4ExtentHeader>()) as *const Ext4Extent };
-        let extents = unsafe { slice::from_raw_parts(extent_ptr, header.eh_entries as usize) };
-
-        for extent in extents {
+        let extent_count = header.eh_entries as usize;
+        for i in 0..extent_count {
+            let extent = unsafe { core::ptr::read_unaligned(extent_ptr.add(i)) };
             let ee_block = extent.ee_block;
             let ee_len = extent.len();
 
-            if logical_block >= ee_block as u64 && logical_block < (ee_block + ee_len as u32) as u64
+            if logical_block >= ee_block as u64
+                && logical_block < (ee_block + ee_len as u32) as u64
             {
                 let physical_block = extent.start() + (logical_block - ee_block as u64);
                 return Ok(physical_block);
@@ -1252,14 +1261,16 @@ impl Ext4Filesystem {
 
             let mut block_offset = 0usize;
             while block_offset < self.block_size as usize {
-                let entry_ptr = unsafe { buffer[block_offset..].as_ptr() as *const Ext4DirEntry };
-                let entry = unsafe { &*entry_ptr };
+                // Read the packed directory entry with an unaligned load.
+                let entry_ptr = buffer[block_offset..].as_ptr() as *const Ext4DirEntry;
+                let entry = unsafe { core::ptr::read_unaligned(entry_ptr) };
 
                 if entry.rec_len == 0 {
                     break;
                 }
 
                 if entry.inode != 0 && entry.name_len as usize == name.len() {
+                    // Compare the entry name to the requested path component.
                     let entry_name = entry.name_bytes();
                     if entry_name == name {
                         return Ok(entry.inode);
@@ -1314,70 +1325,90 @@ impl Ext4Filesystem {
 
     /// Commit current journal transaction
     pub fn journal_commit(&mut self) -> Ext4Result<()> {
-        if let Some(ref mut journal) = self.journal {
-            if let Some(trans) = journal.current_transaction.take() {
-                // Write descriptor block
-                let mut desc_buffer =
-                    kernel_alloc_bytes(self.block_size as usize).ok_or(Ext4Error::NoMem)?;
-
-                let header = Jbd2Header {
-                    h_magic: JBD2_MAGIC_NUMBER,
-                    h_blocktype: JBD2_DESCRIPTOR_BLOCK,
-                    h_sequence: trans.tid,
+        // Extract transaction data without holding a mutable borrow on self.
+        let (journal_start, journal_length, mut journal_block, trans) = match self.journal.as_mut()
+        {
+            Some(journal) => {
+                let trans = match journal.current_transaction.take() {
+                    Some(trans) => trans,
+                    None => return Ok(()),
                 };
 
-                unsafe {
-                    ptr::copy_nonoverlapping(
-                        &header as *const Jbd2Header as *const u8,
-                        desc_buffer.as_mut_ptr(),
-                        mem::size_of::<Jbd2Header>(),
-                    );
-                }
+                // Capture journal state needed for the write sequence.
+                (
+                    journal.journal_start,
+                    journal.journal_length as u64,
+                    journal.head as u64,
+                    trans,
+                )
+            }
+            None => return Ok(()),
+        };
 
-                let mut journal_block = journal.head as u64;
-                self.write_block(journal.journal_start + journal_block, &desc_buffer)?;
-                journal_block += 1;
+        // Write descriptor block
+        let mut desc_buffer =
+            kernel_alloc_bytes(self.block_size as usize).ok_or(Ext4Error::NoMem)?;
 
-                // Write data blocks to journal
-                for data in &trans.data {
-                    self.write_block(journal.journal_start + journal_block, data)?;
-                    journal_block += 1;
-                    if journal_block >= journal.journal_length as u64 {
-                        journal_block = 1;
-                    }
-                }
+        let header = Jbd2Header {
+            h_magic: JBD2_MAGIC_NUMBER,
+            h_blocktype: JBD2_DESCRIPTOR_BLOCK,
+            h_sequence: trans.tid,
+        };
 
-                // Write commit block
-                let commit_header = Jbd2Header {
-                    h_magic: JBD2_MAGIC_NUMBER,
-                    h_blocktype: JBD2_COMMIT_BLOCK,
-                    h_sequence: trans.tid,
-                };
+        unsafe {
+            ptr::copy_nonoverlapping(
+                &header as *const Jbd2Header as *const u8,
+                desc_buffer.as_mut_ptr(),
+                mem::size_of::<Jbd2Header>(),
+            );
+        }
 
-                let mut commit_buffer =
-                    kernel_alloc_bytes(self.block_size as usize).ok_or(Ext4Error::NoMem)?;
-                unsafe {
-                    ptr::copy_nonoverlapping(
-                        &commit_header as *const Jbd2Header as *const u8,
-                        commit_buffer.as_mut_ptr(),
-                        mem::size_of::<Jbd2Header>(),
-                    );
-                }
-                self.write_block(journal.journal_start + journal_block, &commit_buffer)?;
+        // Write the descriptor into the journal.
+        self.write_block(journal_start + journal_block, &desc_buffer)?;
+        journal_block += 1;
 
-                // Write data to actual locations
-                for (i, block) in trans.blocks.iter().enumerate() {
-                    self.write_block(*block, &trans.data[i])?;
-                }
-
-                // Sync device
-                if let Some(sync_fn) = self.ops.sync {
-                    sync_fn(self.device)?;
-                }
-
-                journal.head = journal_block as u32 + 1;
+        // Write data blocks to the journal.
+        for data in &trans.data {
+            self.write_block(journal_start + journal_block, data)?;
+            journal_block += 1;
+            if journal_block >= journal_length {
+                journal_block = 1;
             }
         }
+
+        // Write commit block
+        let commit_header = Jbd2Header {
+            h_magic: JBD2_MAGIC_NUMBER,
+            h_blocktype: JBD2_COMMIT_BLOCK,
+            h_sequence: trans.tid,
+        };
+
+        let mut commit_buffer =
+            kernel_alloc_bytes(self.block_size as usize).ok_or(Ext4Error::NoMem)?;
+        unsafe {
+            ptr::copy_nonoverlapping(
+                &commit_header as *const Jbd2Header as *const u8,
+                commit_buffer.as_mut_ptr(),
+                mem::size_of::<Jbd2Header>(),
+            );
+        }
+        self.write_block(journal_start + journal_block, &commit_buffer)?;
+
+        // Write data to actual locations.
+        for (i, block) in trans.blocks.iter().enumerate() {
+            self.write_block(*block, &trans.data[i])?;
+        }
+
+        // Sync device after commit to keep metadata consistent.
+        if let Some(sync_fn) = self.ops.sync {
+            sync_fn(self.device)?;
+        }
+
+        // Re-borrow the journal to update its head position.
+        if let Some(journal) = self.journal.as_mut() {
+            journal.head = journal_block as u32 + 1;
+        }
+
         Ok(())
     }
 
@@ -1682,8 +1713,9 @@ impl<'a> Ext4DirIterator<'a> {
 
             self.fs.read_block(physical_block, &mut buffer)?;
 
-            let entry_ptr = unsafe { buffer[block_offset..].as_ptr() as *const Ext4DirEntry };
-            let entry = unsafe { *entry_ptr };
+            // Read the directory entry with an unaligned load.
+            let entry_ptr = buffer[block_offset..].as_ptr() as *const Ext4DirEntry;
+            let entry = unsafe { core::ptr::read_unaligned(entry_ptr) };
 
             if entry.rec_len == 0 {
                 self.position += self.fs.block_size as u64 - block_offset as u64;

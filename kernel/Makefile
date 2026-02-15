@@ -1,7 +1,7 @@
 # Nafuraito Kernel Build Configuration
 # Builds all kernel libraries and links them into kernel.bin
 
-RUSTC = rustc --emit obj -C panic=abort --target x86_64-unknown-linux-gnu \
+RUSTC = rustc +nightly --emit obj -C panic=abort --target x86_64-unknown-linux-gnu \
         -C code-model=kernel -C relocation-model=static \
         -C opt-level=2 -C overflow-checks=no -C debug-assertions=no \
         -C target-feature=-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-avx,-avx2 
@@ -62,7 +62,6 @@ compile: libs
 		$(LIBIDT) \
 		$(LIBPIC) \
 		$(LIBPCI) \
-		$(LIBEXT4) \
 		$(LIBMEMORY) \
 		-o $(ROOT_BUILD_DIR)/kernel.bin
 
