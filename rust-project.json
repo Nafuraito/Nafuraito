@@ -1,0 +1,84 @@
+{
+  "crates": [
+    {
+      "display_name": "gdt",
+      "root_module": "kernel/src/gdt/lib.rs",
+      "edition": "2015",
+      "deps": [],
+      "cfg": [
+        "no_std",
+        "target_arch=\"x86_64\""
+      ]
+    },
+    {
+      "display_name": "idt",
+      "root_module": "kernel/src/idt/lib.rs",
+      "edition": "2015",
+      "deps": [],
+      "cfg": [
+        "no_std",
+        "target_arch=\"x86_64\""
+      ]
+    },
+    {
+      "display_name": "memory",
+      "root_module": "kernel/src/memory/lib.rs",
+      "edition": "2015",
+      "deps": [],
+      "cfg": [
+        "no_std",
+        "target_arch=\"x86_64\""
+      ]
+    },
+    {
+      "display_name": "video",
+      "root_module": "kernel/src/drivers/video/lib.rs",
+      "edition": "2015",
+      "deps": [],
+      "cfg": [
+        "no_std",
+        "target_arch=\"x86_64\""
+      ]
+    },
+    {
+      "display_name": "pic",
+      "root_module": "kernel/src/drivers/pic/lib.rs",
+      "edition": "2015",
+      "deps": [],
+      "cfg": [
+        "no_std",
+        "target_arch=\"x86_64\""
+      ]
+    },
+    {
+      "display_name": "pci",
+      "root_module": "kernel/src/drivers/pci/lib.rs",
+      "edition": "2015",
+      "deps": [],
+      "cfg": [
+        "no_std",
+        "target_arch=\"x86_64\""
+      ]
+    },
+    {
+      "display_name": "ext4journaling",
+      "root_module": "kernel/src/drivers/ext4journaling/ext4journaling.rs",
+      "edition": "2015",
+      "deps": [],
+      "cfg": [
+        "no_std",
+        "target_arch=\"x86_64\""
+      ]
+    },
+    {
+      "display_name": "kernel",
+      "root_module": "kernel/src/main.rs",
+      "edition": "2015",
+      "deps": [],
+      "cfg": [
+        "no_std",
+        "target_arch=\"x86_64\""
+      ]
+    }
+  ]
+}

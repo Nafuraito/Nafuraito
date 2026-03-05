@@ -44,6 +44,80 @@ To build and run the OS in QEMU:
 make run
 ```
 
+## Editor Setup
+
+### NeoVim with LazyVim and GitHub Copilot
+
+This repository ships with everything needed to get a great editing experience
+inside [NeoVim](https://neovim.io) with [LazyVim](https://lazyvim.org).
+
+#### Prerequisites
+
+| Tool | Purpose |
+|------|---------|
+| NeoVim ≥ 0.10 | Editor |
+| [LazyVim](https://lazyvim.org) | NeoVim distribution |
+| `rustup` with the **nightly** toolchain | Rust toolchain (see `rust-toolchain.toml`) |
+| `rust-analyzer` | Rust language server — install via `rustup component add rust-analyzer` |
+| A GitHub Copilot subscription | AI completions |
+
+#### 1 — Enable the LazyVim Copilot extra
+
+Add the Copilot extra to your LazyVim configuration
+(`~/.config/nvim/lua/config/lazy.lua`):
+
+```lua
+require("lazy").setup({
+  spec = {
+    { "LazyVim/LazyVim", import = "lazyvim.plugins" },
+    { import = "lazyvim.plugins.extras.coding.copilot" }, -- GitHub Copilot
+    { import = "plugins" },
+  },
+})
+```
+
+Then run `:Lazy sync` inside NeoVim, followed by `:Copilot auth` to sign in
+with your GitHub account.
+
+#### 2 — Enable project-local configuration (exrc)
+
+The repository contains a `.nvim.lua` file that configures `rust-analyzer` for
+this non-Cargo kernel project. To allow NeoVim to load it automatically, add
+the following to `~/.config/nvim/lua/config/options.lua`:
+
+```lua
+vim.o.exrc = true   -- load .nvim.lua / .nvimrc from the project root
+```
+
+The first time you open the project NeoVim will ask whether to trust
+`.nvim.lua`; answer **yes** (or add it to your trust list with
+`:trust .nvim.lua`).
+
+#### 3 — Install the nightly toolchain and rust-analyzer
+
+```bash
+rustup toolchain install nightly
+rustup component add rust-analyzer --toolchain nightly
+```
+
+#### 4 — Open the project
+
+```bash
+nvim .
+```
+
+`rust-analyzer` will start automatically, index all kernel crates listed in
+`rust-project.json`, and GitHub Copilot will provide context-aware suggestions
+for `no_std` / bare-metal Rust throughout the codebase.
+
+#### Verifying the setup
+
+| Check | Command |
+|-------|---------|
+| Copilot is running | `:Copilot status` |
+| LSP is attached | `:LspInfo` (should show `rust_analyzer`) |
+| Completions work | Type a few characters in a `.rs` file — both LSP and Copilot suggestions should appear |
+
 ## License
 
 This project is licensed under a custom license. See [LICENSE.md](./LICENSE.md) for details.
