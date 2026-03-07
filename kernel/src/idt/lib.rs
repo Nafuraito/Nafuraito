@@ -232,7 +232,12 @@ pub unsafe fn idt_init() {
     IDT.set_interrupt_gate(11, isr11 as u64, kernel_cs, 0);
     IDT.set_interrupt_gate(12, isr12 as u64, kernel_cs, 0);
     IDT.set_interrupt_gate(13, isr13 as u64, kernel_cs, 0);
-    IDT.set_interrupt_gate(14, isr14 as u64, kernel_cs, 0);
+    // Page Fault (vector 14) uses IST5 – a dedicated emergency stack.
+    // When a guard page is hit (stack overflow), the kernel RSP is already
+    // invalid.  Without IST the CPU would push the exception frame onto the
+    // overflowed stack, causing a #DF before our handler runs.  IST5 ensures
+    // the handler always has a clean stack regardless of RSP state.
+    IDT.set_interrupt_gate(14, isr14 as u64, kernel_cs, 5); // IST5 = IST_PAGE_FAULT
     IDT.set_interrupt_gate(15, isr15 as u64, kernel_cs, 0);
     IDT.set_interrupt_gate(16, isr16 as u64, kernel_cs, 0);
     IDT.set_interrupt_gate(17, isr17 as u64, kernel_cs, 0);

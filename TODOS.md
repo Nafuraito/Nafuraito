@@ -14,7 +14,7 @@
 - [X] Parse memory map (E820/UEFI)
 - [X] Refactor bootloader to C
 - [ ] Multiboot2/Limine protocol support
-- [ ] UEFI boot support (alternative to BIOS)
+- [X] UEFI boot support (alternative to BIOS)
 
 ### Global Descriptor Table (GDT)
 - [X] Define kernel code segment (ring 0)

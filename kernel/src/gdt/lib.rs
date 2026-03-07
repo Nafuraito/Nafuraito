@@ -101,6 +101,14 @@ pub const IST_NMI: usize = 2;
 pub const IST_MACHINE_CHECK: usize = 3;
 pub const IST_DEBUG: usize = 4;
 
+/// IST index used by the #PF (page fault) handler.
+///
+/// A dedicated IST entry ensures that even if the kernel's main stack has
+/// overflowed (making RSP invalid), the CPU switches to this clean emergency
+/// stack before invoking the handler, preventing a double-fault / triple-fault
+/// cascade when a guard-page hit is detected.
+pub const IST_PAGE_FAULT: usize = 5;
+
 // =============================================================================
 // Segment Selectors
 // =============================================================================
@@ -292,9 +300,23 @@ extern "C" {
 pub unsafe fn gdt_init() {
     // Set up TSS stack pointers
     TSS.rsp0 = 0x900000;          // Kernel stack for ring 0
-    TSS.ist1 = 0x8F0000;          // IST1 for double fault handler
-    TSS.ist2 = 0x8E0000;          // IST2 for NMI handler
-    TSS.ist3 = 0x8D0000;          // IST3 for machine check
+
+    // Interrupt Stack Table (IST) – each entry is the TOP (highest address)
+    // of a small dedicated stack for a specific critical exception.  The CPU
+    // automatically switches to the named IST stack before pushing the
+    // exception frame, regardless of the current value of RSP.
+    //
+    // Memory layout (each slot is 64 KiB, growing downward from the pointer):
+    //   0x8F0000  IST1 – Double Fault
+    //   0x8E0000  IST2 – NMI
+    //   0x8D0000  IST3 – Machine Check
+    //   0x8C0000  IST4 – Debug (reserved, not yet wired in IDT)
+    //   0x8B0000  IST5 – Page Fault (guards against kernel stack overflows)
+    TSS.ist1 = 0x8F0000;          // IST1: Double Fault handler
+    TSS.ist2 = 0x8E0000;          // IST2: NMI handler
+    TSS.ist3 = 0x8D0000;          // IST3: Machine Check handler
+    // IST4 (0x8C0000) is reserved for the Debug handler; not wired yet.
+    TSS.ist5 = 0x8B0000;          // IST5: Page Fault handler (stack-overflow safety)
     TSS.iopb_offset = size_of::<TaskStateSegment>() as u16;
 
     // Set up TSS descriptor in GDT

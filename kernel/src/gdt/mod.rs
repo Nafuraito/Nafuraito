@@ -301,14 +301,27 @@ pub unsafe fn init() {
     // Set up the TSS with kernel stack for ring 0
     // RSP0 is used when transitioning from ring 3 to ring 0
     TSS.rsp0 = 0x900000; // Kernel stack pointer
-    
-    // Set up Interrupt Stack Table entries for critical interrupts
+
+    // Interrupt Stack Table (IST) – dedicated stacks for critical exceptions.
+    // The CPU switches to the listed stack automatically before pushing the
+    // exception frame, keeping handler execution safe even if the previous
+    // stack was invalid or overflowed.
+    //
+    // Each pointer is the TOP (highest address) of a 64 KiB slot:
+    //   0x8F0000  IST1 – Double Fault
+    //   0x8E0000  IST2 – NMI
+    //   0x8D0000  IST3 – Machine Check
+    //   0x8C0000  IST4 – Debug (reserved, not yet wired)
+    //   0x8B0000  IST5 – Page Fault (enables stack-overflow detection)
     // IST1: Double Fault stack
     TSS.ist1 = 0x8F0000;
     // IST2: NMI stack
     TSS.ist2 = 0x8E0000;
     // IST3: Machine Check stack
     TSS.ist3 = 0x8D0000;
+    // IST5: Page Fault emergency stack (used when #PF is triggered by a guard-page
+    //       hit after the kernel stack has overflowed and RSP is invalid).
+    TSS.ist5 = 0x8B0000;
 
     // Set I/O Permission Bitmap offset (no IOPB = size of TSS)
     TSS.iopb_offset = size_of::<TaskStateSegment>() as u16;

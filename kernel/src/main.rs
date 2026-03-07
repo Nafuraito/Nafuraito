@@ -524,6 +524,18 @@ mod memory {
             file_size: u64,
         ) -> u64;
         pub fn memory_munmap(start: u64, size: usize) -> i32;
+
+        // Guard page subsystem
+        //
+        // guard_page_init()         – must be called once after PMM + paging are online.
+        // guard_page_register()     – mark a virtual page as a guard page in the registry.
+        // guard_page_is_guard_page()– query the registry; used in the #PF handler.
+        // guard_page_alloc_kernel_stack() – allocate a stack with a guard page at its bottom.
+        pub fn guard_page_init();
+        pub fn guard_page_register(virt_addr: u64) -> i32;
+        /// Returns 1 if `addr` falls within a registered guard page, 0 otherwise.
+        pub fn guard_page_is_guard_page(addr: u64) -> i32;
+        pub fn guard_page_alloc_kernel_stack() -> u64;
     }
 }
 
@@ -682,7 +694,13 @@ fn halt_forever() -> ! {
 /// - General protection faults (vector 13)
 /// - Double faults (vector 8) - when handling an exception causes another exception
 ///
-/// Most of these are fatal - we print details and halt
+/// Most of these are fatal - we print details and halt.
+///
+/// **Page fault special handling (vector 14):**
+/// Before treating a `#PF` as a generic error, we read `CR2` (the faulting
+/// virtual address) and check it against the guard-page registry.  A hit means
+/// the kernel stack has grown past its usable region – a stack overflow – and
+/// we print a dedicated diagnostic rather than a generic page-fault message.
 #[no_mangle]
 pub extern "C" fn exception_handler(
     vector: u64,     // Which exception (0-31)
@@ -691,32 +709,124 @@ pub extern "C" fn exception_handler(
     cs: u64,         // Code segment
     rflags: u64,     // CPU flags register
 ) {
-    // Map vector number to human-readable exception name
-    let exception_name = match vector {
-        0 => "Divide Error\0",
-        1 => "Debug\0",
-        2 => "NMI\0",
-        3 => "Breakpoint\0",
-        4 => "Overflow\0",
-        5 => "Bound Range\0",
-        6 => "Invalid Opcode\0",
-        7 => "Device Not Available\0",
-        8 => "Double Fault\0",
-        10 => "Invalid TSS\0",
-        11 => "Segment Not Present\0",
-        12 => "Stack Fault\0",
-        13 => "General Protection Fault\0",
-        14 => "Page Fault\0",
-        16 => "FPU Error\0",
-        17 => "Alignment Check\0",
-        18 => "Machine Check\0",
-        19 => "SIMD Exception\0",
-        20 => "Virtualization\0",
-        21 => "Control Protection\0",
-        _ => "Unknown\0",
-    };
-
     unsafe {
+        // =====================================================================
+        // Special handling for Page Fault (#PF, vector 14)
+        //
+        // Step 1: Read CR2 – the CPU stores the faulting virtual address there
+        //         immediately on fault entry, before any handler code runs.
+        // Step 2: Check the error-code "present" bit (bit 0):
+        //           0 = not-present fault (page not mapped)  ← guard pages land here
+        //           1 = protection violation (page present but access denied)
+        // Step 3: If it is a not-present fault AND CR2 falls inside a registered
+        //         guard page, declare a stack overflow and halt.
+        // Step 4: Otherwise fall through to the generic fault printer.
+        // =====================================================================
+        if vector == 14 {
+            // Read the faulting virtual address from CR2.
+            // SAFETY: CR2 is always valid immediately after a #PF; reading it
+            //         here (before any Rust code that might clobber it) is safe.
+            let fault_addr: u64;
+            core::arch::asm!("mov {}, cr2", out(reg) fault_addr, options(nomem, nostack));
+
+            // bit 0 of the error code: 0 = page not present, 1 = protection fault.
+            // Guard pages are *not mapped*, so they always produce a not-present fault.
+            let is_not_present = (error_code & 0x1) == 0;
+
+            if is_not_present && memory::guard_page_is_guard_page(fault_addr) != 0 {
+                // *** STACK OVERFLOW DETECTED ***
+                //
+                // The faulting address is inside a registered guard page.
+                // The kernel stack grew beyond its usable region.  We cannot
+                // safely unwind or recover; print diagnostics and halt.
+                //
+                // NOTE: We are running on the IST5 emergency stack (set up in
+                //       gdt/lib.rs), so this handler itself has a valid stack
+                //       even though the task's stack is exhausted.
+                serial_print("*** KERNEL STACK OVERFLOW ***\n");
+                serial_print("  Guard page hit at: ");
+                serial_print_hex_u64(fault_addr);
+                serial_print("\n  RIP: ");
+                serial_print_hex_u64(rip);
+                serial_print("\n  Error code: ");
+                serial_print_hex_u64(error_code);
+                serial_print("\n");
+
+                video::print("*** KERNEL STACK OVERFLOW ***\n\0");
+                video::print("  Guard page hit at: \0");
+                print_hex_u64(fault_addr);
+                video::print("\n  RIP: \0");
+                print_hex_u64(rip);
+                video::print("\n\0");
+
+                // Halt – the kernel state is corrupt; no recovery is possible.
+                loop {
+                    core::arch::asm!("hlt");
+                }
+            }
+
+            // Not a guard-page hit – print the generic page-fault diagnostic.
+            let is_write      = (error_code & 0x2) != 0;
+            let is_user       = (error_code & 0x4) != 0;
+            let is_rsvd       = (error_code & 0x8) != 0;
+            let is_instr_fetch = (error_code & 0x10) != 0;
+
+            serial_print("PAGE FAULT: addr=");
+            serial_print_hex_u64(fault_addr);
+            serial_print(" error=");
+            serial_print_hex_u64(error_code);
+            serial_print(" [");
+            if !is_not_present { serial_print("P"); }    // page was present
+            if is_write        { serial_print("W"); }    // write access
+            if is_user         { serial_print("U"); }    // user mode
+            if is_rsvd         { serial_print("RSVD"); } // reserved PTE bit set
+            if is_instr_fetch  { serial_print("IF"); }   // instruction fetch
+            serial_print("]\n  RIP=");
+            serial_print_hex_u64(rip);
+            serial_print("\n");
+
+            video::print("PAGE FAULT: addr=\0");
+            print_hex_u64(fault_addr);
+            video::print(" error=\0");
+            print_hex_u64(error_code);
+            video::print("\n  RIP=\0");
+            print_hex_u64(rip);
+            video::print("\n\0");
+
+            loop {
+                core::arch::asm!("hlt");
+            }
+        }
+
+        // =====================================================================
+        // Generic exception handler (all vectors except 14)
+        // =====================================================================
+
+        // Map vector number to human-readable exception name
+        let exception_name = match vector {
+            0 => "Divide Error\0",
+            1 => "Debug\0",
+            2 => "NMI\0",
+            3 => "Breakpoint\0",
+            4 => "Overflow\0",
+            5 => "Bound Range\0",
+            6 => "Invalid Opcode\0",
+            7 => "Device Not Available\0",
+            8 => "Double Fault\0",
+            10 => "Invalid TSS\0",
+            11 => "Segment Not Present\0",
+            12 => "Stack Fault\0",
+            13 => "General Protection Fault\0",
+            14 => "Page Fault\0",
+            16 => "FPU Error\0",
+            17 => "Alignment Check\0",
+            18 => "Machine Check\0",
+            19 => "SIMD Exception\0",
+            20 => "Virtualization\0",
+            21 => "Control Protection\0",
+            _ => "Unknown\0",
+        };
+
         // Print to serial port first (most reliable)
         serial_print("EXCEPTION: ");
         serial_print(exception_name);
@@ -844,7 +954,7 @@ pub extern "C" fn enter(
         // Temporary: keep hardware interrupts masked to avoid spurious IRQs
         // triggering before the IRQ path is fully stabilized. Flip to true
         // once IRQ handling is validated again.
-        const ENABLE_IRQS: bool = false;
+        const ENABLE_IRQS: bool = true;
 
         // -------------------------------------------------------------------------
         // Initialize COM1 (8N1, 115200 baud) as the very first thing so that
@@ -1021,6 +1131,21 @@ pub extern "C" fn enter(
             print_hex_u64((-pmm_result) as u64);
             video::print(")\n\0");
         }
+
+        // Initialize guard page subsystem.
+        //
+        // Must come after both the PMM (we need physical frames for stack pages)
+        // and paging (we call map_page to set up the usable stack pages).
+        // The guard pages themselves are NOT mapped – that is intentional.
+        //
+        // After this call, any kernel stack allocated with
+        // `guard_page_alloc_kernel_stack()` will have a not-present guard page
+        // at its bottom.  When the stack overflows, the resulting #PF is caught
+        // in `exception_handler` which checks CR2 against the registry and
+        // prints "KERNEL STACK OVERFLOW" instead of a generic page-fault panic.
+        video::print("Initializing guard pages... \0");
+        memory::guard_page_init();
+        video::print("OK\n\0");
 
         // Page-mapping self-test (disabled by default due to instability in some environments).
         const RUN_PAGING_SELFTEST: bool = false;

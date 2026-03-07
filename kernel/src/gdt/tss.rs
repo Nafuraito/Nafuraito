@@ -144,8 +144,17 @@ pub const IST_NMI: usize = 2;
 /// IST index for Machine Check handler
 pub const IST_MACHINE_CHECK: usize = 3;
 
-/// IST index for Debug handler
+/// IST index for Debug handler (reserved; not yet wired in IDT)
 pub const IST_DEBUG: usize = 4;
+
+/// IST index for Page Fault handler.
+///
+/// Using a dedicated IST for `#PF` means the CPU always switches to a clean
+/// emergency stack before invoking the fault handler.  This is critical for
+/// guard-page-based stack overflow detection: when the kernel stack overflows
+/// into the guard page, RSP is invalid, so without an IST the CPU would
+/// double-fault trying to push the exception frame onto the overflowed stack.
+pub const IST_PAGE_FAULT: usize = 5;
 
 // Compile-time size check
 const _: () = assert!(size_of::<TaskStateSegment>() == 104);

@@ -211,6 +211,17 @@ pub use cow::{
 // =============================================================================
 
 mod demand_paging;
+
+// =============================================================================
+// Guard Pages - imported from guard_page.rs
+// =============================================================================
+
+mod guard_page;
+pub use guard_page::{
+    allocate_kernel_stack, guard_page_alloc_kernel_stack, guard_page_init,
+    guard_page_is_guard_page, guard_page_register, is_guard_page, register_guard_page,
+    DEFAULT_STACK_PAGES, KERNEL_STACK_AREA_BASE, MAX_GUARD_PAGES,
+};
 pub use demand_paging::{
     handle_demand_page_fault, mmap, mmap_file, munmap,
     register_file_region as demand_register_file_region, register_region as demand_register_region,
