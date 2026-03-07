@@ -35,6 +35,7 @@ extern crate alloc;
 
 #[path = "drivers/ata.rs"]
 mod ata;
+mod boot_info;
 
 use ata::{ext4_read_block_ata, ext4_sync_ata, ext4_write_block_ata, EXT4_ATA_DEVICE};
 
@@ -54,6 +55,12 @@ unsafe fn serial_outb(val: u8) {
     // Out instruction: sends a byte to an I/O port
     // COM1 is at port 0x3F8
     core::arch::asm!("out dx, al", in("dx") 0x3F8u16, in("al") val, options(nomem, nostack));
+}
+
+/// Send a single byte to any I/O port (used during UART initialisation)
+#[inline(always)]
+unsafe fn serial_outb_port(port: u16, val: u8) {
+    core::arch::asm!("out dx, al", in("dx") port, in("al") val, options(nomem, nostack));
 }
 
 /// Print a string to the serial port
@@ -420,6 +427,11 @@ mod video {
         pub fn set_framebuffer_info(addr: u32, pitch: u32, width: u32, height: u32, bpp: u32);
         pub fn initialize_vga_graphics();
         pub fn writestring_vga(data: *const i8);
+        /// Initialise the VGA text-mode fallback (used when no VESA framebuffer
+        /// is available, e.g. when booted via UEFI/OVMF).  After this call
+        /// writestring_vga() writes to the VGA text buffer at 0xB8000 instead
+        /// of trying to write pixel data to the unmapped default address.
+        pub fn init_textmode_fallback();
     }
 
     pub unsafe fn print(s: &str) {
@@ -828,6 +840,35 @@ pub extern "C" fn enter(
 ) -> ! {
     // The "!" means this function never returns
     unsafe {
+        // -------------------------------------------------------------------------
+        // Initialize COM1 (8N1, 115200 baud) as the very first thing so that
+        // all subsequent serial_print() calls produce clean output.
+        // Without this the 16550 UART is in an undefined state; QEMU emulates
+        // the framing-error behaviour (0xFF/0x00 byte pairs) which shows up as
+        // □ in the terminal.
+        //
+        // Register map (base = 0x3F8):
+        //   +0  THR/RBR/DLL  +1  IER/DLM  +2  IIR/FCR
+        //   +3  LCR           +4  MCR       +5  LSR   +6 MSR
+        // -------------------------------------------------------------------------
+        serial_outb_port(0x3F9, 0x00); // +1 IER  — disable all UART interrupts
+        serial_outb_port(0x3FB, 0x80); // +3 LCR  — set DLAB to access baud divisor
+        serial_outb_port(0x3F8, 0x01); // +0 DLL  — divisor low  = 1 → 115200 baud
+        serial_outb_port(0x3F9, 0x00); // +1 DLM  — divisor high = 0
+        serial_outb_port(0x3FB, 0x03); // +3 LCR  — clear DLAB; 8N1 (8 data, no parity, 1 stop)
+        serial_outb_port(0x3FA, 0xC7); // +2 FCR  — enable & clear FIFOs, 14-byte threshold
+        serial_outb_port(0x3FC, 0x0B); // +4 MCR  — DTR + RTS + OUT2 (enables IRQ line)
+
+        serial_print("COM1 initialized\n");
+
+        // Read BootInfo from physical 0x6000 (written by bootloader before
+        // jumping to the kernel). This identifies the boot path (BIOS or UEFI)
+        // and provides the ACPI RSDP address.
+        boot_info::init();
+        serial_print("Boot path: ");
+        serial_print(boot_info::boot_type_str());
+        serial_print("\n");
+
         // Initialize GDT and TSS first
         gdt::gdt_init();
 
@@ -837,16 +878,34 @@ pub extern "C" fn enter(
         // Initialize PIC to remap and mask interrupts
         pic::init();
 
-        // Set up framebuffer for graphics output
+        // -------------------------------------------------------------------------
+        // Set up display output.
+        //
+        // If the bootloader provided a valid VESA framebuffer address use it.
+        // Otherwise (VESA is a real-mode BIOS service and fails when booted via
+        // OVMF/UEFI, so fb_addr arrives as 0) fall back to VGA text mode.
+        // VGA text mode writes character+attribute bytes to 0xB8000 and is
+        // always available on x86 without any special setup.
+        // -------------------------------------------------------------------------
         if fb_addr != 0 {
-            video::set_framebuffer_info(fb_addr, pitch, width, height, bpp);
+            // VBE/BIOS passes bits per pixel (e.g. 32); vga.c uses BYTES per pixel.
+            // UEFI boot path already passes bytes directly (4 for 32 bpp).
+            let bpp_bytes = if bpp > 8 { bpp / 8 } else { bpp };
+            video::set_framebuffer_info(fb_addr, pitch, width, height, bpp_bytes);
+            video::initialize_vga_graphics();
+        } else {
+            // No VESA framebuffer: initialise the text-mode fallback so that
+            // writestring_vga() routes to VGA text mode (0xB8000) instead of
+            // writing pixel data to the unmapped default address 0xFD000000.
+            video::init_textmode_fallback();
         }
-
-        video::initialize_vga_graphics();
         video::print("Welcome to Nafuraito OS!\n\0");
         video::print("GDT, IDT, PIC initialized... OK\n\0");
 
-        // Initialize Memory Manager (E820 parsing)
+        // Initialize Memory Manager (E820 parsing).
+        // Both BIOS and UEFI boot paths provide an E820-format memory map:
+        //   BIOS: BIOS INT 15h E820 entries at 0x0500 (passed in R9)
+        //   UEFI: UEFI memory descriptors converted to E820 at 0x7000 (passed in R9)
         video::print("Initializing Memory... \0");
         memory::init(memory_map_addr);
         video::print("OK\n\0");

@@ -758,6 +758,26 @@ load_kernel:
      mov rsp, 0x2000000
     and rsp, ~0xF
     
+    ; -------------------------------------------------------------------------
+    ; Write BootInfo struct to physical 0x6000.
+    ; The kernel reads this to detect the boot path and find system resources.
+    ; Layout (32 bytes, matches boot_info_t in bootloader/include/boot_info.h):
+    ;   +0x00  magic              = 0x4E414649 ("NAFI")
+    ;   +0x04  boot_type          = 0x42494F53 ("BIOS")
+    ;   +0x08  rsdp_addr          = 0 (BIOS path: no UEFI config table)
+    ;   +0x10  mem_map_entry_count
+    ;   +0x14  _reserved0         = 0
+    ;   +0x18  _reserved1         = 0
+    ; -------------------------------------------------------------------------
+    mov dword [0x6000], 0x4E414649      ; magic = "NAFI"
+    mov dword [0x6004], 0x42494F53      ; boot_type = "BIOS"
+    xor rax, rax
+    mov qword [0x6008], rax             ; rsdp_addr = 0
+    movzx eax, word [rel memory_map_entries]
+    mov dword [0x6010], eax             ; mem_map_entry_count
+    mov dword [0x6014], 0               ; _reserved0
+    mov qword [0x6018], 0               ; _reserved1
+
     ; Pass boot info to kernel via registers (System V AMD64 ABI):
     ; rdi = framebuffer address (32-bit, zero-extended)
     ; rsi = pitch

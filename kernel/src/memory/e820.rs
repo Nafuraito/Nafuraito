@@ -14,8 +14,11 @@
 
 #![allow(unused)]
 
-/// Memory map storage address (set by bootloader)
-pub const MEMORY_MAP_ADDR: usize = 0x6000;
+/// Physical address where the UEFI bootloader stores the E820-format memory map
+/// (converted from EFI_MEMORY_DESCRIPTOR before ExitBootServices).
+/// The BIOS bootloader stores E820 at 0x0500 instead; both addresses are
+/// passed to the kernel via register R9 at boot time.
+pub const MEMORY_MAP_ADDR: usize = 0x7000;
 
 /// Maximum number of memory map entries
 pub const MAX_MEMORY_ENTRIES: usize = 64;
