@@ -53,7 +53,7 @@ This project is licensed under a custom license. See [LICENSE.md](./LICENSE.md) 
 
 ## Contributing
 
-Contributions are welcome and appreciated, but **only with the explicit prior permission of the copyright holder**. By submitting a contribution, you agree to grant the copyright holder a perpetual, irrevocable, worldwide, royalty-free, unrestricted right to use, modify, and distribute your contribution.
+Contributions are welcome and appreciated, but **only when respecting the license fully**. By submitting a contribution, you agree to grant the copyright holder a perpetual, irrevocable, worldwide, royalty-free, unrestricted right to use, modify, and distribute your contribution.
 
 Please review the [LICENSE.md](./LICENSE.md) file thoroughly before contributing.
 
