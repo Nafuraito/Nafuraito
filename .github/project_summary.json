@@ -1,0 +1,13 @@
+{
+  "generated": "2026-03-03T00:00:00Z",
+  "project": "Nafuraito",
+  "language": "Rust",
+  "no_std": true,
+  "rust_source_files": 24,
+  "entry_point": "kernel/src/main.rs",
+  "build_command": "make",
+  "run_command": "make run",
+  "artifacts": ["build/disk.img"],
+  "key_dirs": ["bootloader/src","kernel/src","kernel/src/drivers","kernel/src/memory","kernel/src/gdt","kernel/src/idt"],
+  "notes": "Kernel uses custom allocator and runtime shims; many TODOs tracked in TODOS.md"
+}

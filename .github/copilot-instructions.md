@@ -17,6 +17,8 @@ This is a custom operating system written primarily in Rust, developed from scra
 - Complex logic blocks should have inline comments explaining "why", not "what"
 - Target: ~1 explanatory comment per 3-5 lines for non-trivial code
 - Mark unfinished work with `TODO:` or `FIXME:` comments
+- Mark unsafe code with `SAFETY:` comments explaining the invariants and assumptions
+- Mark any potential problems or edge cases with `NOTE:` comments to highlight areas for future review
 
 ### OS-Specific Patterns
 - Hardware interaction should be abstracted behind safe interfaces
@@ -28,10 +30,8 @@ This is a custom operating system written primarily in Rust, developed from scra
 
 ### Module Organization
 - `kernel/` - Core kernel functionality
-- `drivers/` - Hardware drivers
+- `drivers/` - Hardware drivers + device interfaces + abstraction layers + any OS-specific subsystems (e.g. VFS, scheduler, FS)
 - `mem/` - Memory management
-- `fs/` - Filesystem implementation
-- `proc/` - Process/task management
 
 ### Key Guidelines
 - Keep platform-specific code isolated in `arch/` subdirectories

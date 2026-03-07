@@ -4,6 +4,7 @@
 #![allow(unused)]
 
 use core::arch::asm;
+use core::ptr;
 
 // Simple serial output for debugging
 #[inline(always)]
@@ -513,9 +514,12 @@ pub fn paging_init(root_table_phys: u64) -> Result<(), &'static str> {
         PagingMode::FourLevel
     };
 
+    // Mask out CR3 control bits (PCID/PWT/PCD) to leave only the table base.
+    let root_aligned = root_table_phys & !0xFFFu64;
+
     let manager = PagingManager {
         mode,
-        root_table_phys,
+        root_table_phys: root_aligned,
         la57_supported,
         nx_supported,
     };
@@ -555,23 +559,24 @@ unsafe fn phys_to_virt(phys_addr: u64) -> *mut u8 {
 unsafe fn alloc_page_table() -> Result<u64, &'static str> {
     extern "C" {
         fn pmm_alloc_frame() -> u64;
+        fn pmm_alloc_dma32_frame() -> u64;
     }
-    
-    let addr = pmm_alloc_frame();
+
+    // Prefer DMA32 (<4 GiB) frames so the identity map always covers the table.
+    let mut addr = pmm_alloc_dma32_frame();
+    if addr == 0 {
+        addr = pmm_alloc_frame();
+    }
     if addr == 0 {
         return Err("Failed to allocate page table frame");
     }
-    
-    // Zero out the new page table using rep stosq
-    asm!(
-        "cld",
-        "rep stosq",
-        in("rdi") addr,
-        in("rax") 0u64,
-        in("rcx") 512u64,  // 4096 / 8 = 512 qwords
-        options(nostack)
-    );
-    
+
+    let table_ptr = phys_to_virt(addr) as *mut u64;
+    if table_ptr.is_null() {
+        return Err("Page table frame not identity-mapped (<4 GiB required)");
+    }
+
+    ptr::write_bytes(table_ptr, 0, PAGE_TABLE_ENTRIES);
     Ok(addr)
 }
 
@@ -1398,178 +1403,30 @@ pub unsafe extern "C" fn paging_flush_tlb() {
     flush_tlb();
 }
 
-/// Map a page (C wrapper) - implements page table walk directly to avoid calling issues
+/// Map a page (C wrapper) - delegates to the Rust helper to avoid duplicate logic
 #[no_mangle]
 pub unsafe extern "C" fn paging_map_page(virt_addr: u64, phys_addr: u64, flags: u64) -> i32 {
-    // Get manager
-    let manager = match get_paging_manager() {
-        Some(m) => m,
-        None => return -1,
-    };
-    
-    // Validate alignment
-    if (phys_addr & 0xFFF) != 0 {
-        return -2;
+    let virt = VirtAddr::new(virt_addr);
+    let phys = PhysAddr::new(phys_addr);
+
+    let mut page_flags = PageTableFlags::from_raw(flags);
+    page_flags.set(PageTableFlags::PRESENT);
+
+    match map_page(virt, phys, page_flags) {
+        Ok(_) => 0,
+        Err(_) => -1,
     }
-    
-    let root_phys = manager.root_table_phys();
-    let mut current = root_phys;
-    
-    // Extract indices
-    let pml4_idx = ((virt_addr >> 39) & 0x1FF) as usize;
-    let pdpt_idx = ((virt_addr >> 30) & 0x1FF) as usize;
-    let pd_idx = ((virt_addr >> 21) & 0x1FF) as usize;
-    let pt_idx = ((virt_addr >> 12) & 0x1FF) as usize;
-    
-    let table_flags = 0x3u64; // Present + Writable
-    
-    // PML4 -> PDPT
-    let pml4 = current as *mut u64;
-    let pml4_entry = pml4.add(pml4_idx);
-    if (*pml4_entry & 1) == 0 {
-        let new_table = match alloc_page_table() {
-            Ok(addr) => addr,
-            Err(_) => return -3,
-        };
-        *pml4_entry = new_table | table_flags;
-    }
-    current = *pml4_entry & !0xFFF;
-    
-    // PDPT -> PD
-    let pdpt = current as *mut u64;
-    let pdpt_entry = pdpt.add(pdpt_idx);
-    if (*pdpt_entry & 1) == 0 {
-        let new_table = match alloc_page_table() {
-            Ok(addr) => addr,
-            Err(_) => return -4,
-        };
-        *pdpt_entry = new_table | table_flags;
-    }
-    current = *pdpt_entry & !0xFFF;
-    
-    // PD -> PT
-    let pd = current as *mut u64;
-    let pd_entry = pd.add(pd_idx);
-    if (*pd_entry & 1) == 0 {
-        let new_table = match alloc_page_table() {
-            Ok(addr) => addr,
-            Err(_) => return -5,
-        };
-        *pd_entry = new_table | table_flags;
-    }
-    current = *pd_entry & !0xFFF;
-    
-    // Set PT entry
-    let pt = current as *mut u64;
-    let pt_entry = pt.add(pt_idx);
-    *pt_entry = (phys_addr & !0xFFF) | flags | 1; // Ensure present bit
-    
-    // Flush TLB
-    invlpg(virt_addr);
-    
-    0
 }
 
-/// Unmap a page (C wrapper) - implements page table walk directly
+/// Unmap a page (C wrapper) - delegates to the Rust helper
 /// Returns 0 on success, negative error code on failure
 #[no_mangle]
 pub unsafe extern "C" fn paging_unmap_page(virt_addr: u64) -> i32 {
-    // Get manager
-    let manager = match get_paging_manager() {
-        Some(m) => m,
-        None => return -1,
-    };
-    
-    let root_phys = manager.root_table_phys();
-    
-    // Extract indices
-    let pml4_idx = ((virt_addr >> 39) & 0x1FF) as usize;
-    let pdpt_idx = ((virt_addr >> 30) & 0x1FF) as usize;
-    let pd_idx = ((virt_addr >> 21) & 0x1FF) as usize;
-    let pt_idx = ((virt_addr >> 12) & 0x1FF) as usize;
-    
-    // Walk to PML4
-    let pml4 = root_phys as *mut u64;
-    let pml4_entry = pml4.add(pml4_idx);
-    if (*pml4_entry & 1) == 0 {
-        return -2; // Page not mapped (PML4)
+    let virt = VirtAddr::new(virt_addr);
+    match unmap_page(virt) {
+        Ok(_) => 0,
+        Err(_) => -1,
     }
-    let pdpt_phys = *pml4_entry & !0xFFF;
-    
-    // Walk to PDPT
-    let pdpt = pdpt_phys as *mut u64;
-    let pdpt_entry = pdpt.add(pdpt_idx);
-    if (*pdpt_entry & 1) == 0 {
-        return -3; // Page not mapped (PDPT)
-    }
-    let pd_phys = *pdpt_entry & !0xFFF;
-    
-    // Walk to PD
-    let pd = pd_phys as *mut u64;
-    let pd_entry = pd.add(pd_idx);
-    if (*pd_entry & 1) == 0 {
-        return -4; // Page not mapped (PD)
-    }
-    let pt_phys = *pd_entry & !0xFFF;
-    
-    // Walk to PT and clear entry
-    let pt = pt_phys as *mut u64;
-    let pt_entry = pt.add(pt_idx);
-    if (*pt_entry & 1) == 0 {
-        return -5; // Page not mapped (PT)
-    }
-    *pt_entry = 0; // Clear the entry
-    
-    // Check if PT is now empty and free it
-    let mut pt_empty = true;
-    for i in 0..512 {
-        if *pt.add(i) != 0 {
-            pt_empty = false;
-            break;
-        }
-    }
-    
-    if pt_empty {
-        *pd_entry = 0; // Clear PD entry
-        
-        extern "C" {
-            fn pmm_free_frame(addr: u64) -> i32;
-        }
-        pmm_free_frame(pt_phys);
-        
-        // Check if PD is now empty
-        let mut pd_empty = true;
-        for i in 0..512 {
-            if *pd.add(i) != 0 {
-                pd_empty = false;
-                break;
-            }
-        }
-        
-        if pd_empty {
-            *pdpt_entry = 0; // Clear PDPT entry
-            pmm_free_frame(pd_phys);
-            
-            // Check if PDPT is now empty
-            let mut pdpt_empty = true;
-            for i in 0..512 {
-                if *pdpt.add(i) != 0 {
-                    pdpt_empty = false;
-                    break;
-                }
-            }
-            
-            if pdpt_empty {
-                *pml4_entry = 0; // Clear PML4 entry
-                pmm_free_frame(pdpt_phys);
-            }
-        }
-    }
-    
-    // Flush TLB
-    invlpg(virt_addr);
-    
-    0
 }
 
 /// Translate virtual to physical address (C wrapper)

@@ -13,6 +13,51 @@
 /* Maximum E820 entries to produce from UEFI memory map conversion. */
 #define MAX_E820_ENTRIES      256
 
+/* =============================================================================
+ * Minimal serial (COM1) output for post-ExitBootServices diagnostics.
+ * ============================================================================= */
+static inline void io_outb(UINT16 port, UINT8 val)
+{
+    __asm__ volatile("outb %b0, %w1" :: "a"(val), "d"(port));
+    /* Mirror to QEMU debugcon (0xE9) so we can capture output even if COM1\n+     * wiring differs across platforms. */
+    __asm__ volatile("outb %b0, %w1" :: "a"(val), "d"((UINT16)0xE9));
+}
+
+static void serial_init(void)
+{
+    /* 115200 8N1, same as the kernel. */
+    io_outb(0x3F9, 0x00); /* IER: disable interrupts */
+    io_outb(0x3FB, 0x80); /* LCR: enable DLAB */
+    io_outb(0x3F8, 0x01); /* DLL: 1 => 115200 baud */
+    io_outb(0x3F9, 0x00); /* DLM */
+    io_outb(0x3FB, 0x03); /* LCR: 8N1, clear DLAB */
+    io_outb(0x3FA, 0xC7); /* FCR: enable + clear FIFOs */
+    io_outb(0x3FC, 0x0B); /* MCR: DTR + RTS + OUT2 */
+}
+
+static void serial_print(const CHAR8 *s)
+{
+    while (*s) {
+        io_outb(0x3F8, *s++);
+    }
+}
+
+static void serial_print_hex(UINT64 v)
+{
+    static const CHAR8 HEX[] = "0123456789ABCDEF";
+    serial_print("0x");
+    int shift = 60;
+    int started = 0;
+    while (shift >= 0) {
+        UINT8 nibble = (v >> shift) & 0xF;
+        if (nibble || started || shift == 0) {
+            started = 1;
+            io_outb(0x3F8, HEX[nibble]);
+        }
+        shift -= 4;
+    }
+}
+
 /* ============================================================================
  * ACPI RSDP GUIDs
  *
@@ -160,6 +205,13 @@ EFIAPI
 efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
     EFI_STATUS Status;
+    /* Clear the screen as soon as we take control to present a clean handoff. */
+    if (SystemTable != NULL && SystemTable->ConOut != NULL) {
+        /* Ignore failures; console may be redirected or unavailable. */
+        uefi_call_wrapper(SystemTable->ConOut->SetAttribute, 2,
+                          SystemTable->ConOut, EFI_TEXT_ATTR(EFI_WHITE, EFI_BLACK));
+        uefi_call_wrapper(SystemTable->ConOut->ClearScreen, 1, SystemTable->ConOut);
+    }
 
     InitializeLib(ImageHandle, SystemTable);
     Print(L"Nafuraito UEFI Bootloader\n");
@@ -408,6 +460,20 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         );
     }
 
+    /* After ExitBootServices we can safely log over COM1 for debugging. */
+    serial_init();
+    serial_print("UEFI loader: fb=");
+    serial_print_hex((UINT64)(UINT32)FbBase);
+    serial_print(" pitch=");
+    serial_print_hex((UINT64)FbPitch);
+    serial_print(" map=");
+    serial_print_hex((UINT64)UEFI_E820_MAP_ADDR);
+    serial_print(" entries=");
+    serial_print_hex((UINT64)e820_count);
+    serial_print(" rsdp=");
+    serial_print_hex(rsdp_addr);
+    serial_print("\n");
+
     /* -------------------------------------------------------------------
      * Step 6: Jump to the kernel entry point at 0x100000.
      *
@@ -428,28 +494,33 @@ efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
      * NOTE: FbBase is truncated to 32 bits; for QEMU's virtual VGA the
      * GOP framebuffer is always in the low 4 GiB (typically 0xFD000000).
      * ------------------------------------------------------------------- */
-    register UINT64 r_rdi __asm__("rdi") = (UINT64)(UINT32)FbBase;
-    register UINT64 r_rsi __asm__("rsi") = (UINT64)FbPitch;
-    register UINT64 r_rdx __asm__("rdx") = (UINT64)FbWidth;
-    register UINT64 r_rcx __asm__("rcx") = (UINT64)FbHeight;
-    register UINT64 r_r8  __asm__("r8")  = (UINT64)4;                  /* bytes/pixel */
-    register UINT64 r_r9  __asm__("r9")  = (UINT64)UEFI_E820_MAP_ADDR; /* E820 map    */
-    register UINT64 r_cnt __asm__("rbx") = (UINT64)e820_count;         /* entry count */
-
     __asm__ volatile (
+        /* Load kernel entry arguments into the correct registers */
+        "movq %[fb],  %%rdi\n\t"
+        "movq %[pit], %%rsi\n\t"
+        "movq %[wid], %%rdx\n\t"
+        "movq %[hei], %%rcx\n\t"
+        "movq %[bpp], %%r8\n\t"
+        "movq %[map], %%r9\n\t"
         /* Set up a fresh kernel stack at 31 MiB */
         "movq $0x1FF0000, %%rsp\n\t"
         "andq $-16,       %%rsp\n\t"
         /* Push 7th argument: memory-map entry count */
-        "pushq %[cnt]\n\t"
+        "movq %[cnt], %%rax\n\t"
+        "pushq %%rax\n\t"
         "subq $8, %%rsp\n\t"    /* re-align stack to 16 bytes before call */
         /* Jump to kernel _start */
         "movq $0x100000, %%rax\n\t"
         "jmpq *%%rax\n\t"
-        /* Input operands ensure the register variables are live here */
-        :: "r"(r_rdi), "r"(r_rsi), "r"(r_rdx), "r"(r_rcx),
-           "r"(r_r8),  "r"(r_r9),  [cnt] "r"(r_cnt)
-        :  "rax", "memory"
+        :
+        : [fb]  "r"((UINT64)(UINT32)FbBase),
+          [pit] "r"((UINT64)FbPitch),
+          [wid] "r"((UINT64)FbWidth),
+          [hei] "r"((UINT64)FbHeight),
+          [bpp] "r"((UINT64)4),
+          [map] "r"((UINT64)UEFI_E820_MAP_ADDR),
+          [cnt] "r"((UINT64)e820_count)
+        : "rax", "rdi", "rsi", "rdx", "rcx", "r8", "r9", "memory"
     );
     __builtin_unreachable();
 }

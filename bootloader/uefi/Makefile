@@ -53,7 +53,7 @@ $(BUILD_DIR)/bootx64.so: $(BUILD_DIR)/main.o
 # then emit a PE32+ EFI Application (-O pei-x86-64, --subsystem 10).
 $(BUILD_DIR)/BOOTX64.EFI: $(BUILD_DIR)/bootx64.so
 	$(OBJCOPY) -I elf64-x86-64 -O pei-x86-64 --subsystem=10 \
-	           -j .text -j .sdata -j .data -j .dynamic \
+	           -j .text -j .sdata -j .data -j .rodata -j .dynamic \
 	           -j .dynsym -j .rel -j .rela -j .reloc \
 	           $< $@
 

@@ -154,13 +154,14 @@ void set_framebuffer_address(uint32_t addr, uint32_t pitch)
 	gfx_pitch = pitch;
 }
 
-void set_framebuffer_info(uint32_t addr, uint32_t pitch, uint32_t width, uint32_t height, uint32_t bpp)
+/* bpp_bytes: bytes per pixel (e.g., 4 for 32 bpp GOP). */
+void set_framebuffer_info(uint32_t addr, uint32_t pitch, uint32_t width, uint32_t height, uint32_t bpp_bytes)
 {
 	gfx_buffer = (volatile uint8_t*)(uintptr_t)addr;
 	gfx_pitch = pitch;
 	gfx_width = width;
 	gfx_height = height;
-	gfx_bpp = bpp / 8;  /* Convert bits to bytes */
+	gfx_bpp = bpp_bytes ? bpp_bytes : VGA_GFX_BPP;
 }
 
 uint32_t get_framebuffer_address(void)
@@ -536,9 +537,83 @@ void initialize_vga_video(void)
 	text_cursor_y = 0;
 }
 
+/*=============================================================================
+ * VGA Text-Mode Fallback
+ *
+ * Used when no VESA/GOP framebuffer is available (e.g. UEFI/OVMF boot without
+ * a working linear framebuffer).  The VGA text buffer lives at physical address
+ * 0xB8000 and stores (character, attribute) byte pairs for an 80x25 grid.
+ * This requires zero setup — it is always present on x86 hardware and in QEMU.
+ *===========================================================================*/
+
+#define VGA_TEXT_COLS   80
+#define VGA_TEXT_ROWS   25
+#define VGA_TEXT_ATTR   0x0F  /* white-on-black */
+
+/* Pointer into the VGA text buffer. */
+static volatile uint16_t *vga_text_buf = (volatile uint16_t *)0xB8000;
+static uint8_t  vga_text_col = 0;
+static uint8_t  vga_text_row = 0;
+
+/* Flag: non-zero if we are in text-mode fallback (no linear framebuffer). */
+static uint8_t  vga_textmode_active = 0;
+
+static void vga_text_scroll(void)
+{
+	uint32_t i;
+	for (i = 0; i < (VGA_TEXT_ROWS - 1) * VGA_TEXT_COLS; i++)
+		vga_text_buf[i] = vga_text_buf[i + VGA_TEXT_COLS];
+	for (i = (VGA_TEXT_ROWS - 1) * VGA_TEXT_COLS; i < VGA_TEXT_ROWS * VGA_TEXT_COLS; i++)
+		vga_text_buf[i] = (uint16_t)(' ' | ((uint16_t)VGA_TEXT_ATTR << 8));
+	vga_text_row = VGA_TEXT_ROWS - 1;
+}
+
+static void vga_text_putchar(char c)
+{
+	if (c == '\n' || c == '\r') {
+		vga_text_col = 0;
+		vga_text_row++;
+		if (vga_text_row >= VGA_TEXT_ROWS)
+			vga_text_scroll();
+		return;
+	}
+	if (c == '\0')
+		return;
+
+	vga_text_buf[vga_text_row * VGA_TEXT_COLS + vga_text_col] =
+		(uint16_t)((uint8_t)c | ((uint16_t)VGA_TEXT_ATTR << 8));
+
+	if (++vga_text_col >= VGA_TEXT_COLS) {
+		vga_text_col = 0;
+		if (++vga_text_row >= VGA_TEXT_ROWS)
+			vga_text_scroll();
+	}
+}
+
+/* Called from Rust enter() when fb_addr == 0.
+ * Clears the text screen and enables text-mode routing in writestring_vga(). */
+void init_textmode_fallback(void)
+{
+	uint32_t i;
+	vga_textmode_active = 1;
+	vga_text_col = 0;
+	vga_text_row = 0;
+	/* Clear the 80x25 text buffer to spaces */
+	for (i = 0; i < VGA_TEXT_ROWS * VGA_TEXT_COLS; i++)
+		vga_text_buf[i] = (uint16_t)(' ' | ((uint16_t)VGA_TEXT_ATTR << 8));
+}
+
+/* Route to VGA text mode when no linear framebuffer is available, otherwise
+ * use the VESA pixel renderer.  The gfx_puts() path is only safe after
+ * set_framebuffer_info() has been called with a valid address. */
 void writestring_vga(const char* str)
 {
-	gfx_puts(str);
+	if (vga_textmode_active) {
+		while (*str)
+			vga_text_putchar(*str++);
+	} else {
+		gfx_puts(str);
+	}
 }
 
 /*==============================================================================

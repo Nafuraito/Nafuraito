@@ -72,6 +72,11 @@ static inline void insw(uint16_t port, void* addr, uint32_t count) {
 #define KERNEL_START_SECTOR 64
 #define KERNEL_SECTORS      128
 
+/* LBA offset of the ext4 partition on the hybrid disk image.
+ * Layout: 1 MiB gap (stage2) | 64 MiB FAT32 ESP | ext4 starts at 65 MiB.
+ * 65 MiB = 65 * 1024 * 1024 / 512 = 133120 sectors. */
+#define EXT4_PARTITION_LBA  133120U
+
 // ATA Primary Bus Ports
 #define ATA_PRIMARY_DATA     0x1F0
 #define ATA_PRIMARY_ERROR    0x1F1

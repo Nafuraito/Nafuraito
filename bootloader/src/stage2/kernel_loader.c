@@ -281,10 +281,11 @@ uint64_t load_kernel_c(vbe_info_t* vbe, memory_info_t* mem) {
     }
     serial_str("C:ATA_OK\n");
     
-    // Step 2: Initialize the EXT4 filesystem
-    // Our partition starts at sector 2048 (that's 1MB into the disk)
-    // This is a common partition alignment for modern disks
-    ret = ext4_boot_init(&ext4_ctx, 2048);
+    // Step 2: Initialize the EXT4 filesystem.
+    // With the hybrid BIOS+UEFI layout the ext4 partition is the second
+    // partition, starting at 65 MiB (after the 64 MiB FAT32 ESP).
+    // EXT4_PARTITION_LBA is defined in bootloader.h.
+    ret = ext4_boot_init(&ext4_ctx, EXT4_PARTITION_LBA);
     if (ret != EXT4_SUCCESS) {
         serial_str("C:MOUNT_FAIL\n");
         return 0;  // Failed to mount - maybe corrupted filesystem?

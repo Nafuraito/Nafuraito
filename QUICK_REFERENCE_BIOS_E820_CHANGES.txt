@@ -1,0 +1,166 @@
+================================================================================
+NAFURAITO OS: BIOS/E820-SPECIFIC CODE - QUICK REFERENCE
+================================================================================
+
+KEY DEPENDENCIES ON E820/BIOS:
+
+1. E820 MEMORY MAP PARSING
+   File: kernel/src/memory/e820.rs (Lines 17-30, 114-158, 160-176, 271-298)
+   - E820Entry struct: 24 bytes (base, length, type, acpi_extended)
+   - Types: 1=Usable, 2=Reserved, 3=ACPI Reclaimable, 4=ACPI NVS, 5=Bad
+   - MemoryMap::parse(addr): Reads from fixed address, scans until invalid entry
+   - Entry count determined by: first entry with type<1 or type>5 or length==0
+
+2. MEMORY INITIALIZATION SEQUENCE
+   File: kernel/src/memory/lib.rs (Lines 47-50)
+   - memory_init(memory_map_addr): Parses E820 from address in R9 register
+   - Global MEMORY_MAP_STORAGE: Stores parsed map for later use
+
+3. KERNEL ENTRY POINT
+   File: kernel/src/main.rs (Lines 832-839, 898, 983-1002)
+   - enter(fb_addr, pitch, width, height, bpp, memory_map_addr)
+   - R9 register = memory_map_addr (0x500 or 0x6000 from BIOS)
+   - [RSP] = memory_map_entry_count on stack
+   - Calls: memory::init(R9) -> pmm_init_c() -> paging_init_c()
+
+4. PHYSICAL MEMORY MANAGER
+   File: kernel/src/memory/pmm.rs (Lines 241-410, 1113-1138)
+   - PMM::init(memory_map): Creates bitmap allocator from E820 entries
+   - Marks reserved regions (first 1MB, kernel, stack, bitmap, E820 data)
+   - Assumes: E820 map already parsed in global storage
+
+5. PAGING SETUP
+   File: kernel/src/memory/paging.rs (Lines 507-533, 1370-1375)
+   - paging_init_c(root_table_phys): Uses CR3 from bootloader
+   - Assumes: Bootloader set up identity mapping for first 4GB
+   - Checks LA57 support, NX support via CPUID
+
+6. BOOTLOADER E820 COLLECTION
+   File: bootloader/src/stage2/bridge.asm (Lines 277-304, 700-792)
+   - BIOS int 0x15 / 0xE820: Gets E820 memory map in 16-bit real mode
+   - Stores at 0x500 (or 0x6000)
+   - Stores entry count in BP register
+   - Passes address in R9 register to kernel
+
+7. HARDCODED MEMORY LAYOUT (PMM reserves)
+   - 0x00000 - 0x100000: First 1MB (BIOS/bootloader area)
+   - 0x100000 - 0x9000000: Kernel (9MB reserved, actual ~1MB)
+   - 0x1F00000 - 0x2000000: Kernel stack (1MB)
+   - After kernel: PMM bitmap
+   - 0x500 (or 0x6000): E820 memory map
+
+8. UEFI BOOTLOADER (Incomplete)
+   File: bootloader/uefi/src/main.c
+   - Gets memory via UEFI GetMemoryMap (EFI_MEMORY_DESCRIPTOR format)
+   - Does NOT convert to E820 format
+   - Passes R9 = 0 and [RSP] = 0 to kernel (BREAKS kernel!)
+   - Only works if kernel added UEFI memory map support
+
+================================================================================
+REQUIRED CHANGES FOR UEFI COMPATIBILITY:
+
+1. ADD UEFI DESCRIPTOR PARSER
+   Location: kernel/src/memory/e820.rs
+   Add function: parse_uefi_descriptors(descriptors, count)
+   Converts EFI_MEMORY_DESCRIPTOR to E820Entry format
+
+2. EXTEND KERNEL ENTRY POINT
+   Location: kernel/src/main.rs enter()
+   Detect UEFI path: if (R9 == 0 && is_uefi) use alternate memory init
+
+3. UPDATE UEFI BOOTLOADER
+   Location: bootloader/uefi/src/main.c
+   - Allocate buffer for E820Entry array
+   - Convert UEFI descriptors to E820 format
+   - Pass in R9 register (not 0!)
+   - Or: implement bootloader paging setup
+
+4. HANDLE UEFI PAGING REQUIREMENTS
+   Since ExitBootServices invalidates bootloader paging:
+   - Either: bootloader must set up new page tables before ExitBootServices
+   - Or: kernel must set up page tables immediately in entry.asm
+
+5. MAP UEFI MEMORY TYPES TO E820 TYPES
+   EFI_MEMORY_TYPE -> E820Type conversion:
+   - EfiConventionalMemory -> Usable (1)
+   - EfiLoaderCode/Data -> Reserved (2) [for bootloader regions]
+   - EfiRuntimeServicesCode/Data -> Reserved (2)
+   - EfiPersistentMemory -> ACPI NVS (4)
+   - Others -> Reserved (2)
+
+================================================================================
+CRITICAL CODE PATHS:
+
+BIOS Boot Flow:
+  bridge.asm: get_memory_map() [int 0x15/E820]
+    -> stores at 0x500, count in BP
+    -> calls load_kernel_c()
+    -> sets R9 = memory_map_addr
+    -> calls kernel with [RSP] = entry_count
+    -> kernel/src/main.rs: enter()
+       -> memory::init(R9) [reads from 0x500]
+          -> MemoryMap::parse()
+             -> scans until invalid entry
+       -> pmm_init_c()
+          -> PMM::init(GLOBAL_MEMORY_MAP)
+             -> creates bitmap from E820 entries
+
+UEFI Boot Flow (Current - BROKEN):
+  bootloader/uefi/src/main.c: efi_main()
+    -> GetMemoryMap() [EFI_MEMORY_DESCRIPTOR format]
+    -> exits boot services
+    -> sets R9 = 0, [RSP] = 0 (WRONG!)
+    -> calls kernel
+    -> kernel/src/main.rs: enter()
+       -> memory::init(0) [tries to read from NULL!]
+          -> Parsing fails or crashes
+
+UEFI Boot Flow (Fixed):
+  bootloader/uefi/src/main.c: efi_main()
+    -> GetMemoryMap() [get EFI_MEMORY_DESCRIPTOR array]
+    -> Allocate E820Entry buffer
+    -> Convert UEFI descriptors to E820Entry format
+    -> exits boot services
+    -> sets R9 = E820_BUFFER_ADDR, [RSP] = descriptor_count
+    -> calls kernel
+    -> kernel receives valid E820 entries in R9
+
+================================================================================
+KEY CONSTANTS:
+
+MEMORY_MAP_ADDR = 0x6000 or 0x500 (where E820 entries stored)
+MAX_MEMORY_ENTRIES = 64 (max E820 entries)
+PAGE_SIZE = 4096 (4KB)
+KERNEL_LOAD_ADDR = 0x100000 (1MB)
+KERNEL_END = 0x100000 + 9*1024*1024 (10MB)
+KERNEL_STACK_TOP = 0x2000000 (32MB)
+KERNEL_STACK_SIZE = 0x100000 (1MB)
+
+E820 Entry Types:
+  1 = Usable RAM
+  2 = Reserved (ACPI, ROM, hole)
+  3 = ACPI Reclaimable (can use after reading ACPI tables)
+  4 = ACPI NVS (preserve)
+  5 = Bad Memory
+
+================================================================================
+FILES TO MODIFY FOR UEFI:
+
+Priority 1 (Must Change):
+  ✗ bootloader/uefi/src/main.c (add E820 conversion)
+  ✗ kernel/src/memory/e820.rs (add parse_uefi function)
+
+Priority 2 (Should Change):
+  ~ kernel/src/main.rs enter() (detect UEFI path)
+  ~ kernel/src/memory/lib.rs (add memory_init_uefi)
+
+Priority 3 (May Need to Change):
+  ~ bootloader/src/stage2/entry.asm (add paging setup for UEFI)
+  ~ kernel/src/memory/paging.rs (add UEFI paging setup)
+
+Priority 4 (Can Keep As Is):
+  ✓ kernel/src/memory/pmm.rs (no changes needed, uses global map)
+  ✓ kernel/src/memory/paging.rs (no changes needed for basic UEFI)
+  ✓ bootloader/src/stage2/bootloader.h (compatible with both)
+
+================================================================================

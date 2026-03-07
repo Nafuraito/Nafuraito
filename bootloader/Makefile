@@ -11,9 +11,9 @@ CFLAGS = -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
          -mno-red-zone -mcmodel=kernel -mno-sse -mno-sse2 -fno-pic -fno-pie \
          -Ofast -Wall -Wextra -Wno-unused-parameter -Werror -Wpedantic
 
-.PHONY: all clean stage1 stage2
+.PHONY: all clean stage1 stage2 uefi
 
-all: stage1 stage2
+all: stage1 stage2 uefi
 
 stage1: $(BUILD_DIR)
 	$(ASM) src/stage1/boot.asm -f bin -o $(BUILD_DIR)/stage1.bin
@@ -29,6 +29,9 @@ stage2: $(BUILD_DIR)/stage2
 		-o $(BUILD_DIR)/stage2.bin
 
 
+uefi:
+	$(MAKE) -C uefi
+
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
@@ -37,3 +40,4 @@ $(BUILD_DIR)/stage2:
 
 clean:
 	rm -rf $(BUILD_DIR)/stage1.bin $(BUILD_DIR)/stage2.bin $(BUILD_DIR)/stage2
+	$(MAKE) -C uefi clean
