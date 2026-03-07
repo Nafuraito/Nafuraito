@@ -25,6 +25,7 @@ Nafuraito is a modern operating system being developed from the ground up. While
 - `gcc` - GNU C Compiler
 - `mtools` - Tools for manipulating MS-DOS files
 - `make` - Build automation
+- `gnu-efi` - for EFI compiling
 
 ### Compilation
 
