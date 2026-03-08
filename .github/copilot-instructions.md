@@ -19,6 +19,7 @@ This is a custom operating system written primarily in Rust, developed from scra
 - Mark unfinished work with `TODO:` or `FIXME:` comments
 - Mark unsafe code with `SAFETY:` comments explaining the invariants and assumptions
 - Mark any potential problems or edge cases with `NOTE:` comments to highlight areas for future review
+- Whenever you have to implement, migrate, refactor etc. something: do NOT create .md files explaining, what you did! You may only put a very short summarization (with the most important details) in a file in the .github folder for YOUR future use.
 
 ### OS-Specific Patterns
 - Hardware interaction should be abstracted behind safe interfaces

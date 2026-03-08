@@ -881,23 +881,11 @@ pub extern "C" fn irq_handler(irq: u64) {
         match irq {
             32 => {
                 // Timer interrupt (IRQ 0)
-                // Fires about 1200 times per second
-                static mut TICK: u64 = 0;
-                TICK += 1;
-                if TICK % 1200 == 0 {
-                    // Print every second (1200 ticks)
-                    video::print("Timer: \0");
-                    print_hex_u64(TICK);
-                    video::print("\n\0");
-                }
             }
             33 => {
                 // Keyboard interrupt (IRQ 1)
                 // Read the scancode from the keyboard controller
-                let scancode = pic::pic_inb(0x60); // Keyboard data port
-                video::print("Key: \0");
-                print_hex_u64(scancode as u64);
-                video::print("\n\0");
+                // let scancode = pic::pic_inb(0x60); // Keyboard data port
             }
             _ => {
                 // Unknown IRQ - just print it
