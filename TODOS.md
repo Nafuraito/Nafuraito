@@ -101,7 +101,7 @@
 - [X] Copy-on-Write (CoW) implementation
 - [X] Demand paging
 - [X] Memory-mapped files (demand-paged file backing)
-- [ ] Guard pages for stack overflow detection
+- [X] Guard pages for stack overflow detection
 
 ### Kernel Heap
 - [X] Simple bump allocator (early boot)
