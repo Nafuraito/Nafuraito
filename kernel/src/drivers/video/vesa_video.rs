@@ -124,9 +124,41 @@ static fn abs_i16(val: i16) -> i16 {
 
 // Draws Line
 static fn gfx_draw_line(x0: i16, y0: i16, x1: i16, y1: i16, rgb: rgb24) {
-    todo!("Implement gfx_draw_line() in video driver!");
-}
+    let dx: i16 = abs_i16(x1 - x0);
+    let dy: i16 = abs_i16(y1 - y0);
+    let sx: i16 = if x0 < x1 { 1 } else { -1 };
+    let sy: i16 = if y0 < y1 { 1 } else { -1 };
+    let err: i16 = dx - dy;
+    let e2: i16;
 
+    // Loops until all pixels are drawn
+    loop {
+        // Set pixel
+        if x0 >= 0 && x0 < gfx_width as i16 && y0 >= 0 && y0 < gfx_height as i16 {
+            let pixel: *mut u8 = (gfx_buffer + y0 * gfx_pitch + x0 * gfx_bpp) as *mut u8;
+            pixel[0] = rgb.b;
+            pixel[1] = rgb.g;
+            pixel[2] = rgb.r;
+            if 4 == gfx_bpp {
+                pixel[3] = 0xFF; // Alpha channel
+            }
+        }
+
+        if x0 == x1 && y0 == y1 {
+            break; // Stops when there's only one pixel
+        }
+
+        e2 = 2 * err;
+        if e2 > -dy {
+            err -= dy;
+            x0 + sx;
+        }
+        if e2 < dx {
+            err += dy;
+            y0 + sy;
+        }
+    }
+}
 
 //////////////////////////////////////////
 /// Public API (called from Kernel etc.)
@@ -198,3 +230,15 @@ fn draw_line_vesa(x0: u16, y0: u16, x1: u16, y1: u16, color: u32) {
 use crate::drivers::video::font_8x16;
 
 // TODO
+
+static text_cursor_x: u16 = 0;
+static text_cursor_y: u16 = 0;
+static text_fg_color: u32 = 0xFFFFFF; // White
+static text_bg_color: u32 = 0x000000; // Black
+
+const CHAR_WIDTH = 8;
+const CHAR_HEIGHT = 16;
+
+static fn gfx_draw_char(x: u16, y: u16, char c) {
+    
+}
