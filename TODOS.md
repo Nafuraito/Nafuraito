@@ -105,7 +105,7 @@
 
 ### Kernel Heap
 - [X] Simple bump allocator (early boot)
-- [ ] Slab allocator for kernel objects
+- [X] Slab allocator for kernel objects
 - [ ] General-purpose allocator (`kmalloc`/`kfree`)
 - [ ] Memory pool allocator
 - [ ] Debug allocator with:

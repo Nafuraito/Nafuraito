@@ -189,56 +189,82 @@ pub unsafe extern "C" fn memmove(dest: *mut u8, src: *const u8, n: usize) -> *mu
 }
 
 // =============================================================================
-// Minimal Heap Allocator (bump)
+// Kernel Heap Allocator Bridge
 // =============================================================================
 //
-// TODO: Replace this with a real kernel heap (slab + general allocator).
-// TODO: Add proper freeing and reuse to avoid memory exhaustion.
+// Stage 1 (early boot):
+//   A tiny bump allocator is used before the memory library heap is initialized.
+//
+// Stage 2 (runtime):
+//   Allocation/deallocation is routed to `memory::heap_*` (slab + page fallback).
+//
+// This two-stage design lets us allocate during bootstrapping and still switch
+// to a real reclaiming allocator once PMM/paging are online.
 //
 
-const HEAP_SIZE: usize = 256 * 1024;
+const EARLY_HEAP_SIZE: usize = 256 * 1024;
 
 #[repr(align(16))]
-struct Heap([u8; HEAP_SIZE]);
+struct EarlyHeap([u8; EARLY_HEAP_SIZE]);
 
-static mut HEAP: Heap = Heap([0; HEAP_SIZE]);
+static mut EARLY_HEAP: EarlyHeap = EarlyHeap([0; EARLY_HEAP_SIZE]);
+static EARLY_HEAP_OFFSET: AtomicUsize = AtomicUsize::new(0);
 
-static HEAP_OFFSET: AtomicUsize = AtomicUsize::new(0);
+struct KernelAllocator;
 
-struct BumpAllocator;
-
-unsafe impl GlobalAlloc for BumpAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+impl KernelAllocator {
+    /// Early-boot fallback allocator used until `heap_init_c()` succeeds.
+    unsafe fn alloc_early(layout: Layout) -> *mut u8 {
         let align = layout.align().max(16);
         let size = layout.size();
-        let mut current = HEAP_OFFSET.load(Ordering::Relaxed);
+        let mut current = EARLY_HEAP_OFFSET.load(Ordering::Relaxed);
 
         loop {
             let aligned = (current + align - 1) & !(align - 1);
             let next = aligned.saturating_add(size);
-            if next > HEAP_SIZE {
+            if next > EARLY_HEAP_SIZE {
                 return core::ptr::null_mut();
             }
 
-            match HEAP_OFFSET.compare_exchange_weak(
+            match EARLY_HEAP_OFFSET.compare_exchange_weak(
                 current,
                 next,
                 Ordering::SeqCst,
                 Ordering::Relaxed,
             ) {
-                Ok(_) => return HEAP.0.as_mut_ptr().add(aligned),
+                Ok(_) => return EARLY_HEAP.0.as_mut_ptr().add(aligned),
                 Err(prev) => current = prev,
             }
         }
     }
+}
 
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
-        // TODO: Implement free once a real allocator is in place.
+unsafe impl GlobalAlloc for KernelAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // Once initialized, always use the runtime heap.
+        if memory::heap_is_initialized_c() != 0 {
+            let ptr = memory::heap_alloc_c(layout.size(), layout.align());
+            if !ptr.is_null() {
+                return ptr;
+            }
+        }
+
+        // Fallback path for the early-boot window and OOM fallback.
+        Self::alloc_early(layout)
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
+        // Early-heap allocations are intentionally leaked because bump storage
+        // does not maintain per-allocation metadata. Runtime allocations are
+        // fully reclaimed by the slab/page heap backend.
+        if memory::heap_is_initialized_c() != 0 {
+            memory::heap_dealloc_c(ptr);
+        }
     }
 }
 
 #[global_allocator]
-static GLOBAL_ALLOCATOR: BumpAllocator = BumpAllocator;
+static GLOBAL_ALLOCATOR: KernelAllocator = KernelAllocator;
 
 #[alloc_error_handler]
 fn alloc_error(_layout: Layout) -> ! {
@@ -260,10 +286,14 @@ pub extern "C" fn kmalloc(size: usize) -> *mut u8 {
     }
 }
 
-/// Kernel heap free entrypoint (currently a no-op).
+/// Kernel heap free entrypoint.
 #[no_mangle]
-pub extern "C" fn kfree(_ptr: *mut u8) {
-    // TODO: Wire this into the real kernel allocator.
+pub extern "C" fn kfree(ptr: *mut u8) {
+    unsafe {
+        if memory::heap_is_initialized_c() != 0 {
+            memory::heap_dealloc_c(ptr);
+        }
+    }
 }
 
 // =============================================================================
@@ -511,6 +541,12 @@ mod memory {
 
         // CoW functions
         pub fn cow_init();
+
+        // Kernel heap (slab + page fallback)
+        pub fn heap_init_c() -> i32;
+        pub fn heap_is_initialized_c() -> u8;
+        pub fn heap_alloc_c(size: usize, align: usize) -> *mut u8;
+        pub fn heap_dealloc_c(ptr: *mut u8);
 
         // Demand-paged mmap helpers
         pub fn memory_mmap_zero(start: u64, size: usize, flags: u64) -> u64;
@@ -1118,6 +1154,18 @@ pub extern "C" fn enter(
             video::print("FAILED (error=\0");
             print_hex_u64((-pmm_result) as u64);
             video::print(")\n\0");
+        }
+
+        // Initialize the runtime kernel heap allocator.
+        //
+        // After this point, Rust global allocation and C `kmalloc/kfree`
+        // are routed through the memory library's slab/page heap backend.
+        video::print("Initializing kernel heap... \0");
+        let heap_result = memory::heap_init_c();
+        if heap_result == 0 && memory::heap_is_initialized_c() != 0 {
+            video::print("OK\n\0");
+        } else {
+            video::print("FAILED\n\0");
         }
 
         // Initialize guard page subsystem.

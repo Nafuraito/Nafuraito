@@ -213,6 +213,23 @@ pub use cow::{
 mod demand_paging;
 
 // =============================================================================
+// Kernel Heap (Slab + Page fallback) - imported from slab.rs + heap.rs
+// =============================================================================
+
+mod slab;
+mod heap;
+pub use heap::{
+    heap_alloc,
+    heap_alloc_c,
+    heap_dealloc,
+    heap_dealloc_c,
+    heap_init,
+    heap_init_c,
+    heap_is_initialized,
+    heap_is_initialized_c,
+};
+
+// =============================================================================
 // Guard Pages - imported from guard_page.rs
 // =============================================================================
 

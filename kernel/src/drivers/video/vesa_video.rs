@@ -240,5 +240,5 @@ const CHAR_WIDTH = 8;
 const CHAR_HEIGHT = 16;
 
 static fn gfx_draw_char(x: u16, y: u16, char c) {
-    
+
 }

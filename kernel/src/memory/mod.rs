@@ -15,6 +15,8 @@ pub mod e820;
 pub mod paging;
 pub mod pat;
 pub mod pmm;
+pub mod slab;
+pub mod heap;
 
 // Re-export commonly used types
 pub use self::e820::{
@@ -168,6 +170,17 @@ pub use self::demand_paging::{
     handle_demand_page_fault, mmap, mmap_file, munmap,
     register_file_region as demand_register_file_region, register_region as demand_register_region,
     BackingKind, FileBacking, MmapReadAtFn, VmRegion,
+};
+
+pub use self::heap::{
+    heap_alloc,
+    heap_alloc_c,
+    heap_dealloc,
+    heap_dealloc_c,
+    heap_init,
+    heap_init_c,
+    heap_is_initialized,
+    heap_is_initialized_c,
 };
 
 /// Memory subsystem error type
